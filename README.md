@@ -52,8 +52,18 @@ scripts/make_b200_bundle.py, scripts/train_model.py   B200 bundle; headless trai
 tests/test_validation.py    rules, YAML-vs-code consistency, data-loading checks
 ```
 
-Steps C–D add `src/schemas`, `src/ingestion`, `src/retrieval`, `src/tools`, `src/agent` and
-`evaluation/`.
+```
+config/prompts/            orchestrator_system.md, synthesis.md
+src/schemas/               ClaimSchema (33 fields), TriageDecision, ClaimState
+src/ingestion/             parser (CSV/JSON/dict) + normalizer (lists missing/invalid fields)
+src/retrieval/             encoder, FAISS index build (real train only), search
+src/tools/                 score_claim, find_similar_claims, check_policy_rules (+ LangChain TOOLS)
+src/agent/                 llm.py, nodes.py, guardrails.py, graph.py, runner.py
+scripts/build_vector_index.py
+tests/                     test_validation, test_tools, test_guardrails, test_graph (+ fixtures/)
+```
+
+Step D adds `evaluation/` and the agent-evaluation notebook.
 
 ## Setup
 
@@ -135,6 +145,39 @@ real validation as a stand-in, so `real_test.csv` stays unopened until the B200 
 
 **Headless alternative** (no Jupyter): `python scripts/train_model.py --trials 80`, or
 `--fast` for a CPU smoke test.
+
+## Triage agent (Step C)
+
+```bash
+cp .env.example .env                      # set LLM_API_KEY (Anthropic by default)
+python scripts/build_vector_index.py      # FAISS index over real training claims -> data/vector_store/
+```
+
+```python
+from src.agent.runner import TriageRunner
+runner = TriageRunner(audit_log="evaluation/results/audit.jsonl")
+thread_id, decision, trace = runner.run_claim(claim_dict)      # pauses at human review
+print(decision.decision, decision.rationale, decision.evidence)
+runner.resume(thread_id, {"decision": "APPROVE", "adjuster_id": "a1", "override_reason": None})
+```
+
+How a claim flows through the graph:
+
+1. `ingest → validate → score` always run.
+2. A ReAct loop of at most `agent.max_steps` turns (`config/settings.yaml`) lets the LLM call
+   `find_similar_claims` and `check_policy_rules`.
+3. `synthesize` writes a JSON decision.
+4. `guardrails` enforces, in code:
+   - only APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFO, never a denial;
+   - a blocking validation failure forces REQUEST_MORE_INFO;
+   - a `high` risk band is never approved;
+   - evidence that is not traceable to a tool output is removed;
+   - after two LLM failures, a rule-based decision is used.
+5. `human_review` pauses the run (LangGraph `interrupt`) for the adjuster.
+
+Without an API key the agent still runs and returns the rule-based decision.
+`pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and
+no network.
 
 ## Data
 
