@@ -6,14 +6,10 @@ __pycache__/
 venv/
 .env
 
-# Derived data and large outputs
-data/interim/*
-data/features/*
-!data/interim/.gitkeep
-!data/features/.gitkeep
-models/*.joblib
-models/*.pt
-models/*.faiss
-mlruns/
-runs/
+# Generated
+data/vector_store/
+evaluation/results/*.jsonl
+outputs/
+b200_bundle.zip
+b200_outputs_*.zip
 *.log

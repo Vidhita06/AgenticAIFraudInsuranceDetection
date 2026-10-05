@@ -1,83 +1,44 @@
-"""Claim validation rules (synopsis Phase 2: business-rule checks).
+"""Field validation (V01-V03) and the rule engine (synopsis Phase 2: business-rule checks).
 
-Every rule is vectorised over a DataFrame of claims and returns a boolean Series
+Rule ids, severities, conditions and explanation text are read from
+config/policy_rules.yaml; the Python checks are registered under the same ids here
+(missing or invalid fields) and in consistency_rules.py (timeline and logic checks).
+
+Every check is vectorised over a DataFrame of claims and returns a boolean Series
 (True = passed). `validate_claim` applies the same rules to one claim and returns
-`[{rule_id, passed, severity, message}]`, which becomes the policy-check tool for
-the agent. Rules flag problems; they never modify or "fix" the data.
+`[{rule_id, passed, severity, message}]`, the output of the agent's policy-check tool.
+Rules flag problems; they never modify or "fix" the data.
 
 Severity levels:
-    blocking: the claim cannot be assessed reliably (candidate for "Request More Information").
+    blocking: the claim cannot be assessed reliably (REQUEST_MORE_INFO).
     warning:  inconsistent or suspicious fields an adjuster should look at.
     info:     unusual but plausible context.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
+import yaml
 
-from src.data.load import CATEGORIES, CLAIM_FIELDS, INTEGER_DOMAINS, MONTHS
+from src.config import path_for
+from src.ml.data import CATEGORIES, CLAIM_FIELDS, INTEGER_DOMAINS
+from src.validation import consistency_rules
+from src.validation.consistency_rules import expected_holder_bin
 
 SEVERITIES = ("blocking", "warning", "info")
-
-AGE_MISSING_SENTINEL = 0
-AGE_MIN, AGE_MAX = 16, 100
-
-# Deterministic Age -> AgeOfPolicyHolder mapping found in the original Kaggle data
-# (holds for 100% of real and synthetic rows). The bin labels do NOT literally
-# contain Age (e.g. Age 26-35 -> "31 to 35"); Age = 0 always maps to "16 to 17".
-AGE_TO_HOLDER_BIN: list[tuple[int, str]] = [
-    (17, "18 to 20"), (20, "21 to 25"), (25, "26 to 30"), (35, "31 to 35"),
-    (45, "36 to 40"), (55, "41 to 50"), (65, "51 to 65"), (10_000, "over 65"),
-]
-
-# Lower bound in days of each Days_Policy_* bin, used for ordering checks.
-POLICY_DAYS_ORDER = {"none": 0, "1 to 7": 1, "8 to 15": 2, "15 to 30": 3, "more than 30": 4}
-# Lower bound in years of each AgeOfVehicle bin.
-VEHICLE_AGE_YEARS = {
-    "new": 0, "2 years": 2, "3 years": 3, "4 years": 4, "5 years": 5, "6 years": 6,
-    "7 years": 7, "more than 7": 8,
-}
-MIN_DRIVING_AGE = 16
-# Every PolicyType mismatch in the original data (~32% of rows) is this single pattern:
-# PolicyType "Sedan - Liability" recorded for a Sport vehicle on a Liability base policy.
-KNOWN_POLICYTYPE_ALIAS = ("Sedan - Liability", "Sport", "Liability")
-LONG_DELAY_MONTHS = 6
-_MONTH_INDEX = {m: i for i, m in enumerate(MONTHS)}
+RULE_TYPES = ("validation", "consistency")
 
 
-def expected_holder_bin(age: pd.Series) -> pd.Series:
-    out = pd.Series("over 65", index=age.index, dtype="string")
-    for upper, label in reversed(AGE_TO_HOLDER_BIN):
-        out[age <= upper] = label
-    out[age == AGE_MISSING_SENTINEL] = "16 to 17"
-    out[age.isna()] = pd.NA
-    return out
-
-
-def month_lag(df: pd.DataFrame) -> pd.Series:
-    """Months from accident to claim, assuming the claim follows the accident (0-11)."""
-    acc = df["Month"].map(_MONTH_INDEX)
-    clm = df["MonthClaimed"].map(_MONTH_INDEX)
-    return (clm - acc) % 12
-
-
-def _valid_age(df: pd.DataFrame) -> pd.Series:
-    age = pd.to_numeric(df["Age"], errors="coerce")
-    return age.notna() & (age != AGE_MISSING_SENTINEL)
-
-
-# ---------------------------------------------------------------------------
-# Rules. Each check takes the claims DataFrame and returns True where passed.
-# ---------------------------------------------------------------------------
-
-def _required_fields(df):
+def required_fields(df, params):
     return df[CLAIM_FIELDS].notna().all(axis=1)
 
 
-def _domain_values(df):
+def domain_values(df, params):
     ok = pd.Series(True, index=df.index)
     for col, allowed in CATEGORIES.items():
         ok &= df[col].isna() | df[col].isin(allowed)
@@ -86,177 +47,94 @@ def _domain_values(df):
             continue
         ok &= df[col].isna() | df[col].isin(allowed)
     age = pd.to_numeric(df["Age"], errors="coerce")
-    ok &= age.isna() | (age == AGE_MISSING_SENTINEL) | age.between(AGE_MIN, AGE_MAX)
+    ok &= age.isna() | (age == 0) | age.between(params["age_min"], params["age_max"])
     return ok
 
 
-def _age_present(df):
-    return df["Age"].isna() | (df["Age"] != AGE_MISSING_SENTINEL)
+def age_present(df, params):
+    return df["Age"].isna() | (df["Age"] != params["missing_sentinel"])
 
 
-def _age_holder_bin(df):
-    expected = expected_holder_bin(pd.to_numeric(df["Age"], errors="coerce"))
-    return (expected == df["AgeOfPolicyHolder"]).fillna(True).astype(bool)
-
-
-def _policytype_mismatch(df):
-    combined = df["VehicleCategory"] + " - " + df["BasePolicy"]
-    return (combined != df["PolicyType"]).fillna(False).astype(bool)
-
-
-def _is_known_policytype_alias(df):
-    return (
-        (df["PolicyType"] == KNOWN_POLICYTYPE_ALIAS[0])
-        & (df["VehicleCategory"] == KNOWN_POLICYTYPE_ALIAS[1])
-        & (df["BasePolicy"] == KNOWN_POLICYTYPE_ALIAS[2])
-    ).fillna(False).astype(bool)
-
-
-def _policytype_consistent(df):
-    # Mismatches other than the known alias are genuine inconsistencies.
-    return ~(_policytype_mismatch(df) & ~_is_known_policytype_alias(df))
-
-
-def _policytype_alias(df):
-    return ~_is_known_policytype_alias(df)
-
-
-def _claim_after_accident(df):
-    # Only detectable when both dates fall in the same month: a claimed week earlier
-    # than the accident week means the claim precedes the accident (or lags ~12 months).
-    lag = month_lag(df)
-    bad = (lag == 0) & (df["WeekOfMonthClaimed"] < df["WeekOfMonth"])
-    return ~bad.fillna(False).astype(bool)
-
-
-def _reporting_delay(df):
-    return ~(month_lag(df) >= LONG_DELAY_MONTHS).fillna(False).astype(bool)
-
-
-def _early_policy_incident(df):
-    bad = df["Days_Policy_Accident"].isin(["none", "1 to 7"]) | (df["Days_Policy_Claim"] == "none")
-    return ~bad.fillna(False).astype(bool)
-
-
-def _policy_days_order(df):
-    acc = df["Days_Policy_Accident"].map(POLICY_DAYS_ORDER)
-    clm = df["Days_Policy_Claim"].map(POLICY_DAYS_ORDER)
-    return ~(clm < acc).fillna(False).astype(bool)
-
-
-def _policy_days_vs_lag(df):
-    # Claim filed within 30 days of policy start cannot be >= 2 months after the accident.
-    within_30 = df["Days_Policy_Claim"].isin(["none", "8 to 15", "15 to 30"])
-    return ~(within_30 & (month_lag(df) >= 2)).fillna(False).astype(bool)
-
-
-def _vehicle_vs_driver_age(df):
-    age = pd.to_numeric(df["Age"], errors="coerce")
-    veh = df["AgeOfVehicle"].map(VEHICLE_AGE_YEARS)
-    driving_years = age - MIN_DRIVING_AGE
-    bad = _valid_age(df) & (age < 21) & (veh > driving_years)
-    return ~bad.fillna(False).astype(bool)
-
-
-def _young_holder_history(df):
-    age = pd.to_numeric(df["Age"], errors="coerce")
-    young = _valid_age(df) & (age < 21)
-    heavy = (df["PastNumberOfClaims"] == "more than 4") | df["NumberOfCars"].isin(
-        ["5 to 8", "more than 8"]
-    )
-    return ~(young & heavy).fillna(False).astype(bool)
+CHECKS = {
+    "V01_REQUIRED_FIELDS": required_fields,
+    "V02_DOMAIN_VALUES": domain_values,
+    "V03_AGE_MISSING": age_present,
+    **consistency_rules.CHECKS,
+}
 
 
 @dataclass(frozen=True)
 class Rule:
     rule_id: str
+    rule_type: str
     severity: str
-    description: str
-    check: Callable[[pd.DataFrame], pd.Series]
-    message: Callable[[Mapping[str, Any]], str]
+    condition: str
+    explanation: str
+    params: Mapping[str, Any] = field(default_factory=dict)
+
+    def check(self, df: pd.DataFrame) -> pd.Series:
+        return CHECKS[self.rule_id](df, self.params).astype(bool)
 
 
-def _fmt_domain(c: Mapping[str, Any]) -> str:
+def load_policy_rules(path: str | Path | None = None) -> dict[str, Any]:
+    with open(path or path_for("policy_rules"), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+@lru_cache(maxsize=4)
+def load_rules(path: str | None = None) -> tuple[Rule, ...]:
+    """Validation and consistency rules from policy_rules.yaml, checked against the code."""
+    spec = load_policy_rules(path)
+    rules = []
+    for r in spec["rules"]:
+        if r["type"] not in RULE_TYPES:
+            continue
+        if r["severity"] not in SEVERITIES:
+            raise ValueError(f"{r['id']}: unknown severity {r['severity']!r}")
+        if r["id"] not in CHECKS:
+            raise ValueError(f"{r['id']} is in policy_rules.yaml but has no Python check")
+        rules.append(Rule(r["id"], r["type"], r["severity"], r["condition"].strip(),
+                          " ".join(r["explanation"].split()), r.get("params") or {}))
+    missing = set(CHECKS) - {r.rule_id for r in rules}
+    if missing:
+        raise ValueError(f"Checks without a rule in policy_rules.yaml: {sorted(missing)}")
+    return tuple(rules)
+
+
+RULES: tuple[Rule, ...] = load_rules()
+RULES_BY_ID = {r.rule_id: r for r in RULES}
+
+
+def _invalid_values(claim: Mapping[str, Any], age_min: int, age_max: int) -> str:
     bad = []
     for col, allowed in CATEGORIES.items():
-        v = c.get(col)
+        v = claim.get(col)
         if v is not None and not pd.isna(v) and v not in allowed:
             bad.append(f"{col}={v!r}")
     for col, allowed in INTEGER_DOMAINS.items():
-        v = c.get(col)
+        v = claim.get(col)
         if allowed is not None and v is not None and not pd.isna(v) and v not in allowed:
             bad.append(f"{col}={v!r}")
-    age = c.get("Age")
-    if age is not None and not pd.isna(age) and age != 0 and not AGE_MIN <= age <= AGE_MAX:
+    age = claim.get("Age")
+    if age is not None and not pd.isna(age) and age != 0 and not age_min <= age <= age_max:
         bad.append(f"Age={age!r}")
-    return "Values outside the known category sets: " + ", ".join(bad)
+    return ", ".join(bad)
 
 
-RULES: list[Rule] = [
-    Rule("V01_REQUIRED_FIELDS", "blocking", "All claim fields are present.",
-         _required_fields,
-         lambda c: "Missing fields: " + ", ".join(
-             f for f in CLAIM_FIELDS if c.get(f) is None or pd.isna(c.get(f)))),
-    Rule("V02_DOMAIN_VALUES", "blocking", "Every field takes a known value.",
-         _domain_values, _fmt_domain),
-    Rule("V03_AGE_MISSING", "blocking", "Age is recorded (0 is the missing-age sentinel).",
-         _age_present,
-         lambda c: "Age is 0 (missing-age sentinel); policyholder age must be obtained."),
-    Rule("V04_AGE_HOLDER_BIN", "warning",
-         "AgeOfPolicyHolder matches the band implied by Age in the reference data.",
-         _age_holder_bin,
-         lambda c: f"Age {c.get('Age')} implies AgeOfPolicyHolder "
-                   f"'{expected_holder_bin(pd.Series([c.get('Age')])).iloc[0]}', "
-                   f"got '{c.get('AgeOfPolicyHolder')}'."),
-    Rule("V05_POLICYTYPE_CONSISTENT", "warning",
-         "PolicyType equals VehicleCategory + ' - ' + BasePolicy (or the known alias).",
-         _policytype_consistent,
-         lambda c: f"PolicyType '{c.get('PolicyType')}' disagrees with VehicleCategory "
-                   f"'{c.get('VehicleCategory')}' and BasePolicy '{c.get('BasePolicy')}'."),
-    Rule("V05B_POLICYTYPE_KNOWN_ALIAS", "info",
-         "PolicyType is not the known 'Sedan - Liability' alias for a Sport/Liability claim.",
-         _policytype_alias,
-         lambda c: "PolicyType 'Sedan - Liability' recorded for a Sport vehicle on a Liability "
-                   "policy: a known labelling quirk of the source data, not a claim error."),
-    Rule("V06_CLAIM_AFTER_ACCIDENT", "warning",
-         "Claim is not dated before the accident (same-month week check).",
-         _claim_after_accident,
-         lambda c: f"Claimed in week {c.get('WeekOfMonthClaimed')} of {c.get('MonthClaimed')} but "
-                   f"accident in week {c.get('WeekOfMonth')} of {c.get('Month')}: claim precedes "
-                   "the accident, or was filed ~12 months later."),
-    Rule("V07_REPORTING_DELAY", "info",
-         f"Claim filed less than {LONG_DELAY_MONTHS} months after the accident.",
-         _reporting_delay,
-         lambda c: f"Accident in {c.get('Month')}, claim in {c.get('MonthClaimed')}: reporting "
-                   f"delay of {LONG_DELAY_MONTHS}+ months."),
-    Rule("V08_EARLY_POLICY_INCIDENT", "warning",
-         "Incident and claim are not at the very start of the coverage period.",
-         _early_policy_incident,
-         lambda c: f"Days_Policy_Accident='{c.get('Days_Policy_Accident')}', "
-                   f"Days_Policy_Claim='{c.get('Days_Policy_Claim')}': incident at or before "
-                   "the start of the policy; check the coverage period."),
-    Rule("V09_POLICY_DAYS_ORDER", "warning",
-         "Days_Policy_Claim is not shorter than Days_Policy_Accident.",
-         _policy_days_order,
-         lambda c: f"Days_Policy_Claim '{c.get('Days_Policy_Claim')}' is shorter than "
-                   f"Days_Policy_Accident '{c.get('Days_Policy_Accident')}'."),
-    Rule("V10_POLICY_DAYS_VS_LAG", "warning",
-         "A claim filed within 30 days of policy start is not 2+ months after the accident.",
-         _policy_days_vs_lag,
-         lambda c: f"Claim filed '{c.get('Days_Policy_Claim')}' days into the policy, yet "
-                   f"{c.get('Month')} -> {c.get('MonthClaimed')} implies a lag of 2+ months."),
-    Rule("V11_VEHICLE_VS_DRIVER_AGE", "info",
-         "For holders under 21, the vehicle is not older than their driving years.",
-         _vehicle_vs_driver_age,
-         lambda c: f"Holder aged {c.get('Age')} with a vehicle aged '{c.get('AgeOfVehicle')}': "
-                   "older than the holder's driving years (possible, e.g. used car)."),
-    Rule("V12_YOUNG_HOLDER_HISTORY", "info",
-         "Holders under 21 do not report >4 past claims or 5+ cars.",
-         _young_holder_history,
-         lambda c: f"Holder aged {c.get('Age')} with PastNumberOfClaims "
-                   f"'{c.get('PastNumberOfClaims')}' and NumberOfCars '{c.get('NumberOfCars')}'."),
-]
-RULES_BY_ID = {r.rule_id: r for r in RULES}
+class _Template(dict):
+    def __missing__(self, key):
+        return "?"
+
+
+def _message_context(claim: Mapping[str, Any]) -> dict[str, Any]:
+    v02 = RULES_BY_ID["V02_DOMAIN_VALUES"].params
+    ctx = {f: claim.get(f) for f in CLAIM_FIELDS}
+    ctx["missing_fields"] = ", ".join(
+        f for f in CLAIM_FIELDS if claim.get(f) is None or pd.isna(claim.get(f)))
+    ctx["invalid_values"] = _invalid_values(claim, v02["age_min"], v02["age_max"])
+    age = pd.to_numeric(pd.Series([claim.get("Age")]), errors="coerce")
+    ctx["expected_holder_bin"] = expected_holder_bin(age).iloc[0]
+    return _Template(ctx)
 
 
 def _prepare(df: pd.DataFrame) -> pd.DataFrame:
@@ -269,7 +147,7 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
 def run_rules(df: pd.DataFrame) -> pd.DataFrame:
     """Boolean frame (rows x rule_id), True = passed."""
     df = _prepare(df)
-    return pd.DataFrame({r.rule_id: r.check(df).astype(bool) for r in RULES}, index=df.index)
+    return pd.DataFrame({r.rule_id: r.check(df) for r in RULES}, index=df.index)
 
 
 def validate_claim(claim: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -279,6 +157,7 @@ def validate_claim(claim: Mapping[str, Any]) -> list[dict[str, Any]]:
         if col in row:
             row[col] = pd.to_numeric(row[col], errors="coerce")
     results = run_rules(row).iloc[0]
+    ctx = _message_context(claim)
     out = []
     for rule in RULES:
         passed = bool(results[rule.rule_id])
@@ -286,7 +165,7 @@ def validate_claim(claim: Mapping[str, Any]) -> list[dict[str, Any]]:
             "rule_id": rule.rule_id,
             "passed": passed,
             "severity": rule.severity,
-            "message": rule.description if passed else rule.message(claim),
+            "message": rule.condition if passed else rule.explanation.format_map(ctx),
         })
     return out
 

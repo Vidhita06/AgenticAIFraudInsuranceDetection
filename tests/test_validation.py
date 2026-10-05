@@ -1,9 +1,12 @@
 import pandas as pd
 import pytest
 
-from src.data.load import CLAIM_FIELDS
-from src.data.validation import (
-    RULES, expected_holder_bin, has_blocking_failure, run_rules, validate_claim,
+from src.config import path_for
+from src.ml.data import CLAIM_FIELDS, RAW_COLUMNS, TARGET, load_raw, load_splits
+from src.validation.consistency_rules import CHECKS as CONSISTENCY_CHECKS
+from src.validation.consistency_rules import expected_holder_bin
+from src.validation.validators import (
+    CHECKS, RULES, has_blocking_failure, load_policy_rules, run_rules, validate_claim,
 )
 
 VALID_CLAIM = {
@@ -125,3 +128,62 @@ def test_run_rules_matches_validate_claim():
 
 def test_all_claim_fields_covered():
     assert set(VALID_CLAIM) == set(CLAIM_FIELDS)
+
+
+def test_policy_rules_yaml_matches_code():
+    spec = load_policy_rules()
+    ids = [r["id"] for r in spec["rules"] if r["type"] in ("validation", "consistency")]
+    assert ids == [r.rule_id for r in RULES]
+    assert set(ids) == set(CHECKS)
+    for r in spec["rules"]:
+        expected = "consistency" if r["id"] in CONSISTENCY_CHECKS else "validation"
+        assert r["type"] == expected, r["id"]
+
+
+# ---------------------------------------------------------------------------
+# Data-loading checks on the real files (skipped if the data is absent)
+# ---------------------------------------------------------------------------
+needs_data = pytest.mark.skipif(not path_for("raw").exists(), reason="data files not present")
+
+
+@pytest.fixture(scope="module")
+def splits():
+    return load_splits()
+
+@needs_data
+def test_raw_shape_and_columns():
+    raw = load_raw()
+    assert raw.shape == (15420, 33)
+    assert list(raw.columns) == RAW_COLUMNS
+
+
+@needs_data
+def test_split_sizes(splits):
+    assert len(splits["real_train"]) == 10793
+    assert len(splits["synthetic"]) == 289207
+    assert len(splits["real_validation"]) == 2313
+    assert splits["real_train"][TARGET].sum() == 646
+
+
+@needs_data
+def test_policynumber_separates_origin(splits):
+    assert splits["real_train"]["PolicyNumber"].max() <= 15420
+    assert splits["synthetic"]["PolicyNumber"].min() == 15421
+
+
+@needs_data
+def test_no_nulls_and_no_blocking_domain_errors(splits):
+    for df in splits.values():
+        assert not df[CLAIM_FIELDS].isna().any().any()
+        res = run_rules(df)
+        assert res["V01_REQUIRED_FIELDS"].all()
+        assert res["V02_DOMAIN_VALUES"].all()
+        assert res["V04_AGE_HOLDER_BIN"].all()
+
+
+@needs_data
+def test_raw_invalid_row_is_caught():
+    raw = load_raw()
+    res = run_rules(raw)
+    bad = raw.loc[~res["V02_DOMAIN_VALUES"], "PolicyNumber"].tolist()
+    assert bad == [1517]

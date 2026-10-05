@@ -125,8 +125,21 @@ def load_augmented_train() -> pd.DataFrame:
 
 
 def load_real_train() -> pd.DataFrame:
+    """Real training rows (is_synthetic == 0). Reads data/processed/real_train.csv if it
+    exists, otherwise derives the rows from the augmented file."""
+    path = path_for("real_train")
+    if path.exists():
+        return _read(path)
     df = load_augmented_train()
     return df[df[ORIGIN_COL] == 0].drop(columns=ORIGIN_COL).reset_index(drop=True)
+
+
+def write_real_train() -> pd.DataFrame:
+    """Write data/processed/real_train.csv = the is_synthetic == 0 rows of the augmented file."""
+    df = load_augmented_train()
+    real = df[df[ORIGIN_COL] == 0].drop(columns=ORIGIN_COL).reset_index(drop=True)
+    real.to_csv(path_for("real_train"), index=False, encoding="utf-8")
+    return real
 
 
 def load_synthetic_train() -> pd.DataFrame:
@@ -155,3 +168,15 @@ def load_splits(include_test: bool = False) -> dict[str, pd.DataFrame]:
     if include_test:
         splits["real_test"] = load_real_test()
     return splits
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Data utilities")
+    parser.add_argument("--write-real-train", action="store_true",
+                        help="write data/processed/real_train.csv from the augmented file")
+    args = parser.parse_args()
+    if args.write_real_train:
+        out = write_real_train()
+        print(f"Wrote {path_for('real_train')} ({len(out)} rows, {int(out[TARGET].sum())} fraud)")

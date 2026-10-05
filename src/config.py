@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+CONFIG_PATH = PROJECT_ROOT / "config" / "settings.yaml"
 RANDOM_STATE = 42
 
 
@@ -20,7 +20,7 @@ def load_config(path: str | Path = CONFIG_PATH) -> dict[str, Any]:
 
 
 def path_for(key: str) -> Path:
-    """Absolute path for an entry under `paths:` in config.yaml."""
+    """Absolute path for an entry under `paths:` in config/settings.yaml."""
     return PROJECT_ROOT / load_config()["paths"][key]
 
 
@@ -33,6 +33,6 @@ def sha256_file(path: str | Path, chunk_size: int = 1 << 20) -> str:
 
 
 def input_hashes() -> dict[str, str]:
-    """SHA-256 of every input data file, for logging in reports and run metadata."""
+    """SHA-256 of every input data file, for logging in reports and model metadata."""
     keys = ["raw", "augmented_train", "real_validation", "real_test"]
     return {load_config()["paths"][k]: sha256_file(path_for(k)) for k in keys}

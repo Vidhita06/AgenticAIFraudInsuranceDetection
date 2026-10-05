@@ -2,13 +2,18 @@
 
 Sources: `details/RBU_Project_Synopsis_Agentic_AI_Insurance_Claims (3).pdf` (RBU synopsis, Session
 2026-27, Sem V, IDEA Lab) and `details/Agentic_AI_Insurance_Claims_Project_Proposal (1).docx`
-(IDEA Lab proposal). Each item is tagged with the phase of this work plan that delivers it:
+(IDEA Lab proposal). Each item is tagged with the phase or step that delivers it. Phases P0–P1 are done; from here on
+the work follows `prompts/claude_code_eda_and_training_prompt.md` (Steps A–D):
 
 - **P0–P7** are the work-plan phases: P0 context, P1 data audit, P2 synthetic audit, P3 EDA,
   P4 features, P5 modelling, P6 final evaluation, P7 agent-ready tools.
-- **Later** means the agent, dashboard and integration phase (synopsis weeks 5–9), outside this session.
+- **Step A** EDA + synthetic audit, **Step B** B200 model training, **Step C** tools, retrieval
+  and LangGraph agent, **Step D** agent evaluation. Phase tags P2/P3 map to Step A, P4–P6 to
+  Step B, P7 to Step C.
+- **Deferred** means dashboard, API, feedback loop and other items outside the current scope
+  (EDA, model training and the agent).
 
-Status values: ✅ done · 🟡 partly done · ⬜ pending.
+Status values: ✅ done · 🟡 partly done · ⬜ pending · ⏸ deferred.
 
 ## 1. Objectives (synopsis §3, proposal §3)
 
@@ -18,8 +23,8 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending.
 | O2 | Autonomous LLM orchestrator that plans and runs a multi-step triage workflow with tools | P7 (design + tools), Later (agent) | ⬜ |
 | O3 | Similar-claims retrieval to compare a new claim with historical patterns | P7 | ⬜ |
 | O4 | Structured, human-readable decision with rationale (Approve / Flag for Investigation / Request More Information) | P5 (decision policy), P7 (explain + rules tools), Later | ⬜ |
-| O5 | Lightweight human-in-the-loop dashboard (review, override, feedback) | P7 (design), Later (Streamlit) | ⬜ |
-| O6 | Close the feedback loop: adjuster decisions used to retrain the model | P7 (`src/feedback/`, `retrain.py` stub), Later | ⬜ |
+| O5 | Lightweight human-in-the-loop dashboard (review, override, feedback) | P7 (design), Later (Streamlit) | ⏸ deferred |
+| O6 | Close the feedback loop: adjuster decisions used to retrain the model | P7 (`src/feedback/`, `retrain.py` stub), Later | ⏸ deferred |
 
 ## 2. Methodology phases (synopsis §5, proposal §6)
 
@@ -30,15 +35,15 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending.
 | M3 | Phase 3: ML/DL scoring | Trained classifier outputs a fraud **probability** (not just a label) | P5 (calibrated model), P7 (`score_claim`) | ⬜ |
 | M4 | Phase 4: Agentic reasoning core | LLM picks tools dynamically: vector-DB similar-claim retrieval, policy verification, claimant history checks | P7 (tools + `docs/agent_design.md`), Later | ⬜ |
 | M5 | Phase 5: Decision synthesis | Combine score, validation results, similar claims, policy and history into a recommendation with rationale | P5 (thresholds), P7 (design), Later | ⬜ |
-| M6 | Phase 6: Human review & feedback | Adjuster approves, modifies or overrides; decisions are logged securely and used for evaluation and retraining | P7 (feedback store), Later (dashboard) | ⬜ |
+| M6 | Phase 6: Human review & feedback | Adjuster approves, modifies or overrides; decisions are logged securely and used for evaluation and retraining | Step C (`human_review` interrupt in the graph); feedback storage and retraining deferred | ⬜ review step · ⏸ feedback |
 | M7 | Modularity | ML model and agent can be developed, tested and validated independently | All (importable `src/` modules, tests) | 🟡 |
 
 ## 3. Deliverables (synopsis §7, proposal §4)
 
 | # | Deliverable | Phase | Status |
 |---|---|---|---|
-| D1 | Cleaned and documented dataset | P1, P2 | 🟡 audit done (`reports/01_data_audit.md`) |
-| D2 | **EDA report** | P3 (`reports/03_eda_report.md`, `notebooks/03_eda.ipynb`) | ⬜ |
+| D1 | Cleaned and documented dataset | P1, P2 | 🟡 audit done (`docs/report/01_data_audit.md`) |
+| D2 | **EDA report** | Step A (`docs/report/01_eda_report.md`, `notebooks/01_eda.ipynb`) | ⬜ |
 | D3 | **Baseline models**: Logistic Regression, Random Forest | P5 | ⬜ |
 | D4 | **Advanced models**: XGBoost and a neural network (PyTorch or TensorFlow) | P5 | ⬜ |
 | D5 | **Class-imbalance handling** | P5 (class weights, `scale_pos_weight`, focal loss; synthetic augmentation experiment) | ⬜ |
@@ -47,11 +52,11 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending.
 | D8 | Callable **tool: similar-claims retrieval** (FAISS/ChromaDB) | P7 (`find_similar_claims`) | ⬜ |
 | D9 | Callable **tool: policy/history checks** | P1 (rules), P3 (red flags), P7 (`check_policy_rules`) | 🟡 rules done |
 | D10 | Functional agentic pipeline (orchestrator + tools) | Later | ⬜ |
-| D11 | Dashboard: submit a claim, view decision and rationale, approve or override | Later | ⬜ |
+| D11 | Dashboard: submit a claim, view decision and rationale, approve or override | Later | ⏸ deferred |
 | D12 | End-to-end pipeline runs on **held-out claims without manual intervention** | Later (P7 designs the evaluation) | ⬜ |
 | D13 | Final project report (problem, methodology, architecture, results, future scope) | P3/P6 reports feed it; Later | ⬜ |
-| D14 | Presentation deck / demo video (`details/PROJECT PRESENTATION TEMPLATE.pptx`) | Later | ⬜ |
-| D15 | Evaluation report with trained baseline and advanced models (timeline, weeks 3–4) | P5 (`reports/05_model_comparison.md`), P6 | ⬜ |
+| D14 | Presentation deck / demo video (`details/PROJECT PRESENTATION TEMPLATE.pptx`) | Later | ⏸ deferred |
+| D15 | Evaluation report with trained baseline and advanced models (timeline, weeks 3–4) | Step B (`docs/report/02_model_report.md`) | ⬜ |
 | D16 | Finalised dataset, fraud-labelling scheme and feature list (timeline, weeks 1–2) | P1, P3, P4 | 🟡 |
 
 ## 4. Metrics and success criteria (proposal §13, timeline)
@@ -77,12 +82,12 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending.
 | A6 | Explainability with SHAP (global and local), agreement with EDA red flags (synopsis cites Lundberg & Lee [7]) | P6 | ⬜ |
 | A7 | Fairness audit by Sex, age band and MaritalStatus | P3, P6 | ⬜ |
 | A8 | Model card | P6 | ⬜ |
-| A9 | Red-flag rules with support and lift (`reports/red_flag_rules.yaml`) for policy checks and rationale text | P3 | ⬜ |
-| A10 | Reproducibility: `RANDOM_STATE = 42`, pinned requirements, `config.yaml`, input SHA-256 hashes, run log | P0–P7 | 🟡 set up in P1 |
+| A9 | Red-flag rules with support and lift (`config/policy_rules.yaml`, type `red_flag`) for policy checks and rationale text | P3 | ⬜ |
+| A10 | Reproducibility: `RANDOM_STATE = 42`, pinned requirements, `config/settings.yaml`, input SHA-256 hashes, run log | P0–P7 | 🟡 set up in P1 |
 | A11 | pytest tests for validation rules, feature pipeline and tools | P1, P4, P7 | 🟡 validation tests done |
-| A12 | Optional FastAPI wrapper over the tools | P7 | ⬜ |
+| A12 | Optional FastAPI wrapper over the tools | P7 | ⏸ deferred |
 | A13 | Agent design document (LangGraph state, tool policy, prompt, guardrails, audit log, dashboard screens, agent evaluation) | P7 (`docs/agent_design.md`) | ⬜ |
-| A14 | Supplementary Kaggle "Auto Insurance Claims Data" (~1,000 rows) as an extra retrieval knowledge base (proposal §10.2) | P7 (documented in agent design), Later | ⬜ |
+| A14 | Supplementary Kaggle "Auto Insurance Claims Data" (~1,000 rows) as an extra retrieval knowledge base (proposal §10.2) | P7 (documented in agent design), Later | ⏸ deferred |
 
 ## 6. Scope constraints to respect
 
