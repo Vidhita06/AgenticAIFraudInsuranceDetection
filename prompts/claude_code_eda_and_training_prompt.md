@@ -23,7 +23,7 @@ as clean, explainable, callable tools.
 
 ## 0. Context you must load first
 
-1. Read `details/Project_Synopsis_Agentic_AI_Insurance_Claims (3).pdf` and
+1. Read `details/RBU_Project_Synopsis_Agentic_AI_Insurance_Claims (3).pdf` and
    `details/Agentic_AI_Insurance_Claims_Project_Proposal (1).docx` (use
    `pdftotext` and `unzip -p … word/document.xml` if no Python readers are
    installed). Write `docs/synopsis_requirements.md`: a checklist of every
