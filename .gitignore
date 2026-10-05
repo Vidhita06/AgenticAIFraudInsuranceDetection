@@ -14,3 +14,4 @@ b200_bundle.zip
 b200_outputs_*.zip
 *.log
 catboost_info/
+notebooks/_*.ipynb
