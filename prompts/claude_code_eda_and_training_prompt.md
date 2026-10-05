@@ -1,270 +1,299 @@
-# Claude Code Prompt — EDA → Model Training → Agent-Ready Fraud Scoring
+# Claude Code Prompt — EDA, B200 Training Notebooks and the Triage Agent
 
 > How to use: open Claude Code in the repo root and paste everything below the
-> line as your first message. Claude Code works phase by phase and stops at each
-> checkpoint for your go-ahead. It covers synopsis weeks 1–4 (dataset, EDA,
-> ML/DL model) and prepares the tool interfaces for weeks 5–7 (agent,
-> retrieval, dashboard).
+> line. It works for a fresh session and for the session that already did the
+> Phase 1 audit on `claude/brave-hawking-ive43h` (step 0 migrates that work).
+> Claude Code stops at each checkpoint for your go-ahead.
 
 ---
 
-You are working in the repo `AgenticAIFraudInsuranceDetection` — an IDEA Lab
-project, **"Agentic AI: Autonomous Insurance Claims Triage & Fraud Assistant"**.
-The final system: an LLM orchestrator (LangGraph) that takes a vehicle insurance
-claim, validates it, calls a fraud-scoring model, retrieves similar historical
-claims (FAISS/ChromaDB), runs policy checks, and produces a recommendation —
-**Approve / Flag for Investigation / Request More Information** — with a written
-rationale, reviewed by a human adjuster in a Streamlit dashboard whose decisions
-feed back into retraining.
+You are working in the repo `AgenticAIFraudInsuranceDetection`, an IDEA Lab
+project: **"Agentic AI: Autonomous Insurance Claims Triage & Fraud Assistant"**.
+A LangGraph agent takes a vehicle insurance claim, validates it, scores it with a
+trained fraud model, retrieves similar past claims, runs policy checks, and
+recommends **APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFO** with a
+grounded rationale. A human adjuster has the final say.
 
-This session covers everything *before* the agent: rigorous EDA, a synthetic-data
-audit, leakage-safe modelling, and packaging the model plus supporting functions
-as clean, explainable, callable tools.
+**Scope of this work: EDA, model training, and the agent. Nothing else.**
+Model training runs on a remote **NVIDIA B200 Jupyter server** that I upload
+notebooks and data to. Everything else (validation rules, tools, retrieval, the
+agent, tests) runs locally.
 
-## 0. Context you must load first
+## 0. Context and migration
 
-1. Read `details/RBU_Project_Synopsis_Agentic_AI_Insurance_Claims (3).pdf` and
-   `details/Agentic_AI_Insurance_Claims_Project_Proposal (1).docx` (use
-   `pdftotext` and `unzip -p … word/document.xml` if no Python readers are
-   installed). Write `docs/synopsis_requirements.md`: a checklist of every
-   objective, deliverable, metric and success criterion, each tagged with the phase
-   below that delivers it. If the synopsis asks for something this prompt doesn't
-   cover, add it. Required items include: an EDA report; baseline (Logistic
-   Regression, Random Forest) **and** advanced (XGBoost **and** a neural network
-   in PyTorch or TensorFlow) models; evaluation with accuracy, precision, recall,
-   F1 and AUC-ROC; class-imbalance handling; tools for fraud scoring,
-   similar-claims retrieval and policy/history checks; false-positive rate on
-   held-out claims; and "precision and recall both meaningfully above the naive
-   baseline".
-2. Data (already in the repo; never modify these files, write derived data to
-   `data/interim/` or `data/features/`):
-   - `data/raw/vehicle_fraud_oracle.csv` — original Kaggle data, 15,420 × 33,
-     UTF-8 with BOM (read with `encoding="utf-8-sig"`). Target `FraudFound_P`.
-   - `data/processed/augmented_train_300k.csv` — 300,000 × 34 (the 33 columns plus
-     `is_synthetic`): 10,793 real training rows (646 fraud) + 289,207 synthetic
-     rows (17,310 fraud), both at a 5.99% fraud rate.
-   - `data/processed/real_validation.csv` — 2,313 real rows, 139 fraud (6.01%).
-   - `data/processed/real_test.csv` — 2,313 real rows, 138 fraud (5.97%).
-3. Facts already verified (re-check them in Phase 1, report any mismatch):
-   - Real train / validation / test are a stratified 70/15/15 split of the
-     original, disjoint by `PolicyNumber`. Exactly one original row is in none of
-     them: `PolicyNumber` 1517, the row with `DayOfWeekClaimed = '0'`,
-     `MonthClaimed = '0'` and `Age = 0` (dropped as invalid).
-   - No synthetic row is an exact copy (all columns except `PolicyNumber`) of any
-     real train, validation or test row, and there are no duplicate rows.
-   - **Every synthetic row has `PolicyNumber` ≥ 15,421** (sequential), real rows
-     have 1–15,420. `PolicyNumber` is therefore a perfect proxy for
-     `is_synthetic` and must never be a feature.
-   - `Age = 0` (missing-age sentinel, higher fraud risk): 232 real-train rows,
-     5,242 synthetic.
-   - `PolicyType` ≠ `VehicleCategory + " - " + BasePolicy` in ~32% of rows in both
-     real and synthetic data. It is one pattern only: Sport vehicles on Liability
-     policies are always recorded as "Sedan - Liability", so `PolicyType` adds
-     nothing beyond `VehicleCategory` + `BasePolicy`.
-   - Year distribution is similar across splits (1994 > 1995 > 1996).
-   - Strong univariate signals: `Fault` (Policy Holder 7.82% vs Third Party 1.17%),
-     `BasePolicy` (All Perils 10.28%, Collision 7.11%, Liability 0.77%),
-     `VehicleCategory` (Utility 11.04%, Sedan 8.28%, Sport 1.42%), `VehiclePrice`
-     extremes (<20k 8.48%, >69k 7.94%), `PoliceReportFiled`, `AgentType`.
-   - `Deductible` is 400 for ~96% of rows; `DriverRating` is uniform over 1–4.
+1. Read the synopsis `details/RBU_Project_Synopsis_Agentic_AI_Insurance_Claims (3).pdf`
+   and the proposal `details/Agentic_AI_Insurance_Claims_Project_Proposal (1).docx`.
+   If `docs/synopsis_requirements.md` exists, keep it; otherwise create it as a
+   checklist of objectives, deliverables and metrics. Mark items owned by the
+   deferred parts (dashboard, API, feedback loop) as "deferred".
+2. If Phase 1 work exists on branch `claude/brave-hawking-ive43h` (`src/data/*`,
+   `reports/01_data_audit.md`, 13 validation rules, 25 tests), merge it in and
+   **move it into the layout below**. Keep the logic and tests, change the
+   locations, and use `git mv` where possible so history is kept:
+   - `src/data/load.py` → `src/ml/data.py` (loaders, category sets, natural orders)
+   - `src/data/validation.py` → split into `src/validation/validators.py`
+     (missing or invalid fields) and `src/validation/consistency_rules.py`
+     (timeline and logic checks). Rule ids, conditions, severities and
+     explanation text move to `config/policy_rules.yaml`, and the code reads them
+     from there.
+   - `config.yaml` → `config/settings.yaml`; `reports/` → `docs/report/`
+     (tables in `docs/report/tables/`, figures in `docs/report/figures/`).
+   - Remove `src/data/` once it's empty and fix all imports and tests.
+3. Data files, renamed to match the layout (`git mv`, never change contents):
+   - `data/raw/vehicle_fraud_oracle.csv` → `data/raw/fraud_oracle.csv`
+     (15,420 × 33, UTF-8 with BOM; read with `encoding="utf-8-sig"`).
+   - `data/processed/augmented_train_300k.csv`: 300,000 × 34 = 10,793 real rows
+     (`is_synthetic = 0`, 646 fraud) + 289,207 synthetic rows (17,310 fraud).
+   - `data/processed/real_validation.csv`: 2,313 real rows, 139 fraud.
+   - `data/processed/real_test.csv`: 2,313 real rows, 138 fraud.
+   - Create `data/processed/real_train.csv` = the `is_synthetic == 0` rows of the
+     augmented file (drop `is_synthetic`), using a small script.
+   - `data/raw/insurance_claims.csv` (the supplementary Kaggle "Auto Insurance
+     Claims Data") is not in the repo. Leave it out; don't block on it.
+4. Verified facts and decisions already made (don't re-litigate):
+   - The real train, validation and test splits don't overlap. No synthetic row
+     copies a real claim. Every synthetic row has `PolicyNumber` ≥ 15,421, so
+     `PolicyNumber` (and `is_synthetic`) must **never** be a feature.
+   - `Age = 0` means missing age. It is a blocking validation failure that leads
+     to REQUEST_MORE_INFO.
+   - `AgeOfPolicyHolder` is fully determined by `Age` (shifted bands), and
+     `PolicyType` is fully determined by `VehicleCategory` + `BasePolicy`
+     (Sport + Liability is always recorded as "Sedan - Liability"). Drop both as
+     model inputs but keep them for display.
+   - Early-policy incidents (V08) are a warning and a red-flag feature, not a
+     blocking rule.
+   - Deductible is 400 for ~96% of rows.
+   - Cost ratio: missed fraud vs unnecessary investigation defaults to 10:1. Also
+     report 5:1 and 20:1, plus a fixed-capacity option (investigate the top 10%).
+   - How the synthetic data was generated is unknown. Treat the generator as a
+     black box.
 
-## 1. Non-negotiable rules (apply in every phase)
+## 1. Target layout (repo root = `agentic-claims-triage/`)
 
-- **Real data is the only ground truth.** Model selection uses
-  `real_validation.csv`; `real_test.csv` is opened **once**, for the final
-  evaluation in Phase 6. Synthetic rows only ever go into training.
-- **No leakage.** Every encoder, scaler, feature selector and resampler is fit
-  inside a scikit-learn `Pipeline` on training data only. Drop `PolicyNumber` and
-  `is_synthetic` from features; assess `RepNumber` (16 agent IDs) before keeping it.
-  Don't apply SMOTE/oversampling on top of data that is already 96% synthetic
-  unless an experiment shows it helps on real validation data.
-- **Metrics.** Always report the synopsis metrics (accuracy, precision, recall, F1,
-  ROC-AUC) **and** PR-AUC (average precision), which is the primary selection
-  metric at 6% prevalence. Also report recall at a fixed precision, F2, the
-  false-positive rate, and the naive baselines (all-legit predictor: 94% accuracy,
-  0 recall; random scorer: PR-AUC ≈ 0.06). With only ~139 fraud cases per real
-  split, give every metric a 95% bootstrap CI.
-- Reproducibility: `RANDOM_STATE = 42`, pinned `requirements.txt`, a `config.yaml`
-  for paths and parameters, and SHA-256 hashes of the input files logged in each
-  report.
-- Code lives in `src/` as importable modules; numbered notebooks in `notebooks/`
-  only call `src/` functions. Figures go to `reports/figures/`, findings to
-  `reports/*.md`. Add `pytest` tests for the validation rules, the feature
-  pipeline and the tool functions. Large outputs (model binaries > 50 MB, run
-  logs) go in `.gitignore`.
-- **Stop at every CHECKPOINT:** summarise findings and decisions in ≤ 15 bullets,
-  list open questions, commit, and wait for my approval.
+Build **only** what is marked ✅. Don't create files or empty placeholders for
+⏸ items; they come later and will follow this same layout.
 
-## 2. Phase 1 — Data audit & validation rules (CHECKPOINT)
+```
+README.md ✅   requirements.txt ✅   requirements-train.txt ✅ (B200 extras)   .env.example ✅
+config/settings.yaml ✅  config/policy_rules.yaml ✅  config/prompts/{orchestrator_system,synthesis}.md ✅
+data/raw/{fraud_oracle.csv ✅, insurance_claims.csv ⏸}
+data/processed/{augmented_train_300k,real_train,real_validation,real_test}.csv ✅
+data/vector_store/{claims.faiss, claims_meta.parquet} ✅ (generated, git-ignored)
+data/feedback/ ⏸
+models/{fraud_model.joblib, preprocessor.joblib, shap_explainer.pkl, model_card.json} ✅ (from the B200)
+notebooks/01_eda.ipynb ✅  02_model_training.ipynb ✅  03_agent_evaluation.ipynb ✅
+src/schemas/{claim.py, decision.py, state.py} ✅
+src/ingestion/{parser.py, normalizer.py} ✅ (minimal)   text_extractor.py ⏸
+src/validation/{validators.py, consistency_rules.py, feature_engineering.py} ✅
+src/ml/{data.py, preprocess.py, train.py, evaluate.py, predict.py, explain.py} ✅
+src/retrieval/{encoder.py, build_index.py, search.py} ✅
+src/tools/{__init__.py, fraud_score_tool.py, similar_claims_tool.py, policy_check_tool.py} ✅   claimant_history_tool.py ⏸
+src/agent/{llm.py, nodes.py, guardrails.py, graph.py, runner.py} ✅
+src/feedback/ ⏸   src/api/ ⏸   dashboard/ ⏸
+scripts/{make_b200_bundle.py, build_vector_index.py, run_batch_triage.py} ✅   train_model.py ✅   retrain_from_feedback.py ⏸
+evaluation/agent_eval.py ✅  evaluation/results/ ✅
+tests/{fixtures/sample_claims.json, test_validation.py, test_tools.py, test_guardrails.py, test_graph.py} ✅
+docs/report/ ✅ (EDA report, model report, model card, agent eval)   docs/architecture.png ✅   docs/presentation/ ⏸
+```
 
-1. Load the four files with explicit dtypes, re-verify §0.3, and profile every
-   column: dtype, cardinality, value set, and per-split frequency.
-2. Write reusable claim-validation rules in `src/data/validation.py`. These
-   become the agent's **policy-check tool** (synopsis Phase 2 "business-rule
-   checks"). Each rule returns `{rule_id, passed, severity, message}`; report
-   violation counts per split and origin:
-   - Required fields present, values inside the known category sets.
-   - `Age = 0` → missing age (→ "Request More Information" candidate).
-   - `AgeOfPolicyHolder` consistent with `Age` using the mapping the data actually
-     uses (the bands are shifted, e.g. Age 26–35 → "31 to 35", Age 0 → "16 to 17"),
-     not the literal band labels.
-   - `PolicyType` consistent with `VehicleCategory` + `BasePolicy`.
-   - Claim not before accident: `MonthClaimed`/`WeekOfMonthClaimed` vs
-     `Month`/`WeekOfMonth`, allowing year wrap-around.
-   - Coverage period: `Days_Policy_Accident` / `Days_Policy_Claim` = `"none"` or
-     `"1 to 7"` (incident at the very start of the policy) and their ordering.
-   - Vehicle age vs policyholder age, and other plausibility checks you find.
-   Quantify rule hits by fraud rate — some violations may themselves be fraud
-   signals. Don't silently "fix" them.
-3. Deliverables: `src/data/load.py`, `src/data/validation.py`,
-   `reports/01_data_audit.md`.
+## 2. Rules that apply everywhere
 
-## 3. Phase 2 — Synthetic data audit (CHECKPOINT)
+- **Only real data counts as ground truth.** Select models on
+  `real_validation.csv`. Open `real_test.csv` once for the final model evaluation
+  and once for the final agent evaluation. Synthetic rows only ever go into
+  training.
+- **No leakage.** Fit every encoder, scaler and resampler on training data only.
+  Don't SMOTE on top of data that is already 96% synthetic unless real-validation
+  results justify it.
+- **Metrics:** accuracy, precision, recall, F1 and ROC-AUC (required by the
+  synopsis), plus PR-AUC (the selection metric at 6% prevalence), F2,
+  false-positive rate and recall at fixed precision. Compare against naive
+  baselines and give 95% bootstrap CIs (there are only ~139 frauds per split).
+- **Single source of truth.** Feature engineering and preprocessing live **only**
+  in `src/validation/feature_engineering.py` and `src/ml/preprocess.py`. The
+  notebooks import them; they never copy the code. The pickled pipeline then
+  references `src.*` classes, which exist both on the B200 and locally.
+- `RANDOM_STATE = 42`; SHA-256 of every input file goes in reports and
+  `model_card.json`.
+- `.gitignore`: `.env`, `data/vector_store/`, `evaluation/results/*.jsonl`, the
+  B200 bundle zip, notebook checkpoints. Commit `models/` only if every file is
+  < 50 MB; otherwise tell me.
+- **Stop at every CHECKPOINT:** summarise in ≤ 15 bullets, list open questions,
+  commit, and wait for my approval.
 
-The model's value depends on whether 289k synthetic rows behave like real claims.
-Compare real-train vs synthetic:
+## 3. Step A — EDA and synthetic-data audit → `notebooks/01_eda.ipynb` (CHECKPOINT)
 
-1. **Fidelity:** per-column distributions (total variation distance, chi-square),
-   fraud rate *per category per origin* (does each red flag hold in both?),
-   Cramér's V association matrices and their difference heatmap, mutual
-   information with the target per origin, and rare-category coverage.
-2. **Adversarial validation:** a LightGBM classifier for real vs synthetic
-   (without `PolicyNumber`!). ROC-AUC ≈ 0.5 means indistinguishable; > 0.7 means
-   detectable artefacts. Report the features driving it.
-3. **Utility:** TRTR (train real) vs TSTR (train synthetic) vs train
-   real+synthetic, all scored on `real_validation.csv` with the same model.
-4. **Memorisation:** distribution of Gower distance to the closest record,
-   synthetic→real-train vs real-validation→real-train. Also check near-duplicates
-   of validation/test rows (e.g. ≥ 31/32 matching columns), which would mean the
-   generator saw held-out data. Ask me how the synthetic data was generated
-   (method, and whether only the 70% train split was used) if it's unclear.
-5. Verdict: use all synthetic data, a filtered subset (drop rule violators or
-   rows the adversarial model finds trivially synthetic), down-weighted samples,
-   or none. Deliverable: `reports/02_synthetic_audit.md`.
+It needs no GPU but must also run on the B200 server, so make it portable as in
+§4.1. Write the narrative to `docs/report/01_eda_report.md` and figures to
+`docs/report/figures/`.
 
-## 4. Phase 3 — Fraud-focused EDA (the synopsis EDA report) (CHECKPOINT)
+1. **Data audit summary:** reuse the Phase 1 findings; don't redo them.
+2. **Synthetic audit:** per-column TVD; fraud rate per category per origin
+   (real vs synthetic); Cramér's V matrix difference; adversarial validation
+   (LightGBM, real vs synthetic, *without* `PolicyNumber`) with the features
+   driving it; TRTR vs TSTR vs train-on-real+synthetic, all scored on real
+   validation; Gower distance-to-closest-record. End with a verdict: use all
+   synthetic rows, a filtered subset, down-weighted rows, or none.
+3. **Fraud EDA on training data** (real first, then confirmed on synthetic):
+   fraud rate per category with Wilson CIs and n; chi-square, Cramér's V and
+   information value ranking; key interactions (`Fault × BasePolicy`,
+   `VehicleCategory × VehiclePrice`, `AgeOfPolicyHolder × Fault`,
+   `PastNumberOfClaims × AddressChange_Claim`, claim lag × `PoliceReportFiled`);
+   sensitive attributes (`Sex`, `MaritalStatus`, `Age`) and whether to exclude
+   them.
+4. **Outputs used later:** a feature-engineering plan, and red-flag rules with
+   support and lift added to `config/policy_rules.yaml` (type `red_flag`, next to
+   the validation rules).
+5. Charts: consistent palette, labelled axes, CIs and n on rates, no pie charts.
 
-Run it on the training data (real-train first, confirm on synthetic); never on test.
+## 4. Step B — B200 training → `notebooks/02_model_training.ipynb` (CHECKPOINT)
 
-1. Target distribution and imbalance by origin and split.
-2. Univariate profiles of all features, grouped: accident & claim timing, policy,
-   vehicle, policyholder, claim process (police report, witness, agent type,
-   supplements, address change, past claims).
-3. Fraud rate per category with Wilson CIs and support counts (sorted bars),
-   chi-square + Cramér's V ranking, and information value / weight of evidence.
-4. Interactions: `Fault × BasePolicy`, `VehicleCategory × VehiclePrice`,
-   `AgeOfPolicyHolder × Fault`, `PastNumberOfClaims × AddressChange_Claim`,
-   claim lag × `PoliceReportFiled`, `Year` trend.
-5. Redundancy: `PolicyType` vs `VehicleCategory` + `BasePolicy`; `Age` vs
-   `AgeOfPolicyHolder`; `Month` vs `MonthClaimed`. Decide what to keep.
-6. Sensitive attributes (`Sex`, `MaritalStatus`, `Age`): document fraud-rate
-   differences and recommend whether to exclude them from the model. Keep them
-   available for the fairness audit either way.
-7. Outputs that feed later phases: (a) a **feature-engineering plan**, (b)
-   **human-readable red-flag rules** with support and lift in
-   `reports/red_flag_rules.yaml`, used by the agent's policy-check tool and its
-   rationale text.
-8. Charts: consistent palette, labelled axes, fraud rates with CIs and n,
-   no pie charts. Deliverables: `notebooks/03_eda.ipynb`, `reports/03_eda_report.md`
-   (written so it can go straight into the final project report).
+### 4.1 Portability: how I'll run it
 
-## 5. Phase 4 — Preprocessing & feature engineering (CHECKPOINT)
+`scripts/make_b200_bundle.py` builds `b200_bundle.zip` containing `src/`,
+`config/`, `data/processed/*.csv` and `requirements-train.txt`. I upload the zip
+and the notebook to the B200 Jupyter server. The notebook's first cells must:
 
-1. Ordinal-encode the range columns in their natural order (`VehiclePrice`,
-   `Days_Policy_Accident`, `Days_Policy_Claim`, `PastNumberOfClaims`,
-   `AgeOfVehicle`, `AgeOfPolicyHolder`, `NumberOfSuppliments`,
-   `AddressChange_Claim`, `NumberOfCars`); ordinal or cyclic encoding for months
-   and weekdays; one-hot (or in-fold target encoding) for nominal columns.
-   Use native categoricals for CatBoost/LightGBM; scale for LR and the NN.
-2. Engineered features, each justified from EDA: `age_missing`, claim lag in weeks
-   (accident → claim), weekend accident/claim flags, `policytype_mismatch`,
-   validation-rule hit count, high-risk combination flags, price-extreme flag.
-3. `build_preprocessor()` in `src/features/` returns the `ColumnTransformer`.
-   `src/schema.py` defines a **pydantic `Claim` model** with every raw field, its
-   type and allowed values. This is the common claim schema from synopsis Phase 1
-   and the input contract for every agent tool.
+- unzip the bundle if it sits next to the notebook (or use the repo if it is
+  already there), add it to `sys.path`, and set `PROJECT_ROOT`;
+- `pip install -r requirements-train.txt` **without reinstalling or upgrading
+  torch/CUDA** (use the server's preinstalled PyTorch);
+- print an environment report: `nvidia-smi`, GPU name, torch and CUDA versions,
+  `torch.cuda.is_bf16_supported()`, versions of xgboost, catboost, lightgbm,
+  sklearn and optuna. The B200 is Blackwell (sm_100): check that torch was
+  built with sm_100 support, and fail early with a clear message if not;
+- have a `FAST_MODE` flag (a 20k-row sample, a few trials) so I can smoke-test
+  "Run All" on a CPU laptop first; and `RUN_SECTIONS` toggles so I can rerun one
+  part;
+- run top to bottom with "Run All" and no manual edits beyond the config cell;
+- write everything to `outputs/` (models, metrics, figures, run log) and finish by
+  zipping `outputs/` into `b200_outputs_<timestamp>.zip` for download, because
+  the server is ephemeral. Checkpoint each finished model to disk as it completes
+  so a disconnect doesn't lose the whole run.
 
-## 6. Phase 5 — Modelling & experiments (CHECKPOINT)
+### 4.2 GPU usage (the data is only 300k rows, so be pragmatic)
 
-1. Baselines: all-legit, rules-only scorer from `red_flag_rules.yaml`, and
-   class-weighted Logistic Regression.
-2. Models required by the synopsis: Random Forest, XGBoost, and a PyTorch MLP
-   (entity embeddings or one-hot input, weighted BCE or focal loss, early stopping
-   on real-validation PR-AUC). Add LightGBM and CatBoost for comparison. Use class
-   weights / `scale_pos_weight` throughout.
-3. **Data-mix experiment (the core research result):** real-only vs real +
-   synthetic at 10/25/50/100% vs synthetic-only, plus synthetic sample weights
-   (0.1, 0.3, 1.0). Plot real-validation PR-AUC against synthetic volume to show
-   whether augmentation actually helps.
-4. Tune the best 1–2 configurations with Optuna (objective: PR-AUC on
-   `real_validation.csv`, or stratified CV with real-only validation folds; about
-   50–100 trials). Watch for overfitting to the 139 validation frauds: prefer
-   stable configurations over a lucky top trial.
-5. Calibrate probabilities (isotonic or Platt) and report the Brier score and a
-   reliability curve. The agent reasons over the probability, so it must be
-   meaningful.
-6. Thresholds: ask me for the cost ratio of a missed fraud vs an unnecessary
-   investigation (default 10:1). Derive the decision policy:
-   - score ≥ high threshold → **Flag for Investigation**
-   - blocking validation failures (e.g. missing age, inconsistent fields) →
-     **Request More Information**
-   - otherwise → **Approve** (always subject to adjuster review)
-7. Track every run (MLflow locally, or a CSV run log): params, data mix, metrics,
-   data hashes. Deliverable: `reports/05_model_comparison.md` with a comparison
-   table of all models, synopsis metrics and PR-AUC side by side.
+- XGBoost: `device="cuda"`, `tree_method="hist"`. CatBoost: `task_type="GPU"`.
+  LightGBM on CPU (its GPU build is unreliable; the node has plenty of cores).
+  Random Forest and Logistic Regression on CPU with `n_jobs=-1` (cuML is
+  optional).
+- PyTorch MLP: entity embeddings for categoricals, bf16 autocast, large batches,
+  weighted BCE or focal loss, early stopping on real-validation PR-AUC,
+  `torch.compile` only if it works on the installed version.
+- Optuna (TPE, 50–100 trials per finalist, pruning) with an objective of
+  real-validation PR-AUC. Prefer stable configurations over a lucky top trial.
 
-## 7. Phase 6 — Final held-out evaluation, explainability & fairness (CHECKPOINT)
+### 4.3 Experiments, in order
 
-1. Evaluate the chosen model **once** on `real_test.csv`: accuracy, precision,
-   recall, F1, F2, ROC-AUC, PR-AUC, false-positive rate, confusion matrix,
-   precision at the top 5%/10%, and a lift chart, all with bootstrap CIs and
-   compared against the baselines. State plainly whether the synopsis success
-   criterion (precision and recall well above the naive baseline) is met.
-2. SHAP: global importance, dependence plots, and local explanations for sample
-   true positives, false positives and false negatives. Check that SHAP agrees with
-   the EDA red flags and explain any disagreement.
-3. Error analysis: which claim segments are missed or over-flagged?
-4. Fairness: recall, FPR and flag rate by `Sex`, age band and `MaritalStatus`.
-5. Deliverables: `reports/06_final_evaluation.md` and `reports/model_card.md`
-   (intended use, data and synthetic-data caveats, metrics, limitations,
-   fairness, thresholds).
+1. Baselines: all-legit, rules-only (red-flag rules), class-weighted Logistic
+   Regression.
+2. Random Forest, XGBoost, LightGBM, CatBoost, MLP, all class-weighted.
+3. **Data-mix experiment:** real-only vs real + 10/25/50/100% synthetic vs
+   synthetic-only, plus synthetic sample weights of 0.1, 0.3 and 1.0. Plot
+   real-validation PR-AUC against synthetic volume.
+4. Tune the best 1–2. Calibrate (isotonic or Platt, on real validation) and
+   report Brier score and a reliability curve.
+5. Thresholds for 5:1, 10:1 and 20:1 costs and for top-10% capacity, saved as
+   risk bands (`low`/`medium`/`high`) in `model_card.json`.
+6. **Final test evaluation, once:** all metrics with CIs vs baselines; SHAP
+   global and local explanations for TP, FP and FN examples; error analysis;
+   fairness (recall, FPR and flag rate by `Sex`, age band and `MaritalStatus`).
 
-## 8. Phase 7 — Agent-ready tools (CHECKPOINT)
+### 4.4 Artifacts (must load on my CPU laptop)
 
-Build the tools; don't build the agent yet.
+- `models/preprocessor.joblib` (fitted `ColumnTransformer` from
+  `src/ml/preprocess.py`), `models/fraud_model.joblib` (calibrated final model,
+  **switched to CPU inference** before saving, e.g. XGBoost `device="cpu"`;
+  if the MLP wins, save TorchScript or `state_dict` + config and give
+  `predict.py` a CPU loader), `models/shap_explainer.pkl`, and
+  `models/model_card.json` (metrics with CIs, thresholds and risk bands,
+  features, data hashes, training date, GPU and **exact package versions**).
+- `requirements.txt` pins the **same** sklearn, xgboost, catboost, lightgbm and
+  shap versions that the B200 run used, so the joblib files load locally. Add a
+  test that loads the artifacts and scores `tests/fixtures/sample_claims.json`.
+- `src/ml/explain.py` falls back to building a fresh `TreeExplainer` from the
+  model if unpickling `shap_explainer.pkl` fails.
+- `scripts/train_model.py` runs the same pipeline headless (for reruns
+  without Jupyter); the notebook calls `src/ml/train.py` as well.
+- `docs/report/02_model_report.md` and `docs/report/model_card.md`.
 
-1. Persist the full pipeline (preprocessor + calibrated model) with `joblib` in
-   `models/`, plus `metadata.json` (version, features, thresholds, metrics, data
-   hashes, training date).
-2. `src/tools/` with pure, typed functions that validate input against `Claim`
-   and return JSON-serialisable output, ready to wrap as LangGraph tools:
-   - `score_claim(claim) -> {fraud_probability, risk_tier, thresholds, model_version}`
-   - `explain_claim(claim, top_k=5) -> [{feature, value, shap_contribution, reason}]`
-   - `check_policy_rules(claim) -> [{rule_id, passed, severity, message}]`
-     (validation rules + red-flag rules)
-   - `find_similar_claims(claim, k=5) -> [{policy_number, similarity, fraud_label,
-     key_fields}]` — a FAISS or ChromaDB index built over **real training claims
-     only** (not synthetic, not validation/test), using the encoded features or
-     embeddings; check that the neighbours look sensible.
-3. `src/feedback/`: the schema and a storage helper (SQLite or CSV) for adjuster
-   decisions (claim, model score, agent recommendation, adjuster decision,
-   override reason, timestamp). Add a `retrain.py` stub that shows how logged
-   decisions would be merged into training data and the model re-evaluated
-   (closes the synopsis feedback loop).
-4. An optional thin FastAPI wrapper over the tools, with tests.
-5. `docs/agent_design.md`: the LangGraph architecture mapped to synopsis phases
-   1–6 (intake → validate → score → reason with tools → decide → human review).
-   Cover state schema, tool-calling policy, the decision-synthesis prompt, guardrails
-   (the agent never auto-denies; the human has the final say), audit logging, the
-   Streamlit dashboard screens, and how to evaluate the agent on held-out claims.
-   Also note how the supplementary Kaggle "Auto Insurance Claims Data" could
-   enrich the retrieval knowledge base.
+At this checkpoint, give me exact upload/run/download instructions. Until I bring
+the real artifacts back, train a `FAST_MODE` model locally and save it as the
+placeholder artifacts, so Step C can be built and tested.
 
-## 9. Final wrap-up
+## 5. Step C — Tools, retrieval and agent (CHECKPOINT)
 
-Update `README.md` with the project overview, repo structure, setup, how to
-reproduce each phase, headline results, and the synopsis checklist with every item
-marked done or pending.
+1. **Schemas.** `src/schemas/claim.py`: pydantic `ClaimSchema` with all 33 raw
+   fields and allowed values (`PolicyNumber` is an optional id).
+   `decision.py`: `TriageDecision {claim_id, decision, fraud_probability,
+   risk_band, rationale, evidence: [{source_tool, fact}], validation_issues,
+   similar_claim_ids, requires_human_review: true}`. `state.py`: LangGraph
+   `ClaimState` (TypedDict with message history, claim, tool results, step
+   count, decision).
+2. **Ingestion (minimal):** `parser.py` reads CSV rows, JSON or a form dict;
+   `normalizer.py` turns them into `ClaimSchema` and lists missing or invalid
+   fields instead of raising.
+3. **Retrieval:** `encoder.py` encodes a claim with the fitted preprocessor
+   (L2-normalised). `build_index.py` / `scripts/build_vector_index.py` builds a
+   FAISS `IndexFlatIP` over **real training claims only** (no synthetic, no
+   validation/test rows), with `claims_meta.parquet` holding ids, key fields and
+   fraud labels. `search.py` returns the top k with similarity scores. Check
+   that neighbours look sensible.
+4. **Tools** (`src/tools/`): plain typed functions wrapped as LangChain tools,
+   with `TOOLS = [...]` exported from `__init__.py`; JSON-serialisable output;
+   each catches its own errors and returns `{ok: false, error}`.
+   - `fraud_score_tool`: probability, risk band, top-5 SHAP factors in plain
+     English, model version.
+   - `similar_claims_tool`: top-k similar past claims, their fraud rate, and key
+     differences.
+   - `policy_check_tool`: validation and consistency rules plus red flags from
+     `config/policy_rules.yaml`.
+5. **Agent** (`src/agent/`, LangGraph):
+   - `llm.py`: provider switch from `.env` (`LLM_PROVIDER` = anthropic, openai or
+     ollama; `MODEL_NAME`; `LLM_API_KEY`). Default to Anthropic `claude-sonnet-5-5`;
+     use `claude-haiku-4-5-20251001` for cheap batch runs.
+   - Graph (`graph.py`): `ingest → validate → score → agent ⇄ tools` (a ReAct
+     loop bounded by `MAX_STEPS` from settings) `→ synthesize → guardrails →
+     human_review` (LangGraph `interrupt`, with a SQLite or memory checkpointer)
+     `→ END`. Validate and score always run; the agent decides which further
+     tools to call (similar claims and policy checks), as the synopsis requires.
+   - `synthesize`: structured output into `TriageDecision` using
+     `config/prompts/synthesis.md`. Every rationale point must cite a tool
+     result.
+   - `guardrails.py`, enforced in code (not only in the prompt): only the three
+     allowed decisions, and never a denial; any blocking validation failure
+     forces REQUEST_MORE_INFO; a `high` risk band can't be APPROVE; any
+     evidence fact not traceable to a tool output is removed and logged; if the
+     LLM fails or returns an invalid output twice, fall back to a deterministic
+     rule-based decision. Everything is marked for human review.
+   - `runner.py`: `run_claim(claim) -> (thread_id, TriageDecision, trace)` and
+     `resume(thread_id, adjuster_decision)`.
+6. **Tests:** use a fake chat model (LangChain `GenericFakeChatModel` with
+   scripted tool calls) so the full suite runs with no API key and no network.
+   Cover validation rules, each tool, each guardrail and the graph paths
+   (approve, flag, request info, LLM failure fallback, max-steps cutoff).
 
-Start with Phase 0 and Phase 1 now. Before writing code, show me a short plan of the
-files you will create in Phase 1.
+## 6. Step D — Agent evaluation → `notebooks/03_agent_evaluation.ipynb` (CHECKPOINT)
+
+Runs locally (needs an LLM key, not a GPU). Develop the prompts on validation
+claims; run the final evaluation once on test claims. Use a stratified sample:
+all test frauds plus a matched number of legit claims, with the size
+configurable to control cost. `scripts/run_batch_triage.py` runs it end to end
+and writes JSONL to `evaluation/results/`. `evaluation/agent_eval.py` reports:
+
+- decision quality vs labels (fraud → FLAG recall, legit → APPROVE rate,
+  REQUEST_MORE_INFO rate), compared with the model-only threshold policy;
+- tool-use rate per tool, average steps, MAX_STEPS hits;
+- guardrail interventions, fallback rate, evidence-grounding failures;
+- rationale quality on a sample: an LLM-as-judge rubric (cites evidence,
+  consistent with the score, no invented facts) plus 20 claims for me to review
+  by hand;
+- latency and token cost per claim; run-to-run consistency on 20 claims run 3
+  times.
+
+Write `docs/report/03_agent_evaluation.md`, a `docs/architecture.png` diagram of
+the graph, and update `README.md` (setup, B200 workflow, how to run each step,
+headline results, synopsis checklist with deferred items marked).
+
+Start with step 0. Before moving files, show me the migration plan (old path →
+new path).
