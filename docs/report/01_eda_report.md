@@ -343,7 +343,7 @@ as RF04.
 - **Every rule keeps lift > 1 on validation.** RF03 weakens to 1.2 (2 of 28), which is why
   it is `info`.
 - **Used together as a rules-only score** (warning = 2, info = 1), the rules reach PR-AUC
-  0.147 and ROC-AUC 0.78 on validation, against 0.060 / 0.50 for a random scorer. This is the
+  0.142 and ROC-AUC 0.78 on validation, against 0.060 / 0.50 for a random scorer. This is the
   "rules-only" baseline for Step B.
 - 21% of validation claims trigger at least one `warning` flag.
 - **Red flags never block a claim.** The policy-check tool reports them, and the agent cites
