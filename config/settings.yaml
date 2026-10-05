@@ -43,3 +43,27 @@ retrieval:
 
 agent:
   max_steps: 8
+
+# Model inputs (decided in the Step A EDA, docs/report/01_eda_report.md §5).
+# Excluded: PolicyNumber, is_synthetic (leakage); PolicyType, AgeOfPolicyHolder (display only);
+# RepNumber (no signal); Sex, MaritalStatus (fairness, no gain); raw Age (-> age_band,
+# age_missing); MonthClaimed, DayOfWeekClaimed, WeekOfMonthClaimed (-> lag/weekend features).
+features:
+  nominal: [Fault, BasePolicy, VehicleCategory, AgentType, AccidentArea, Make,
+            PoliceReportFiled, WitnessPresent]
+  cyclic: [Month, DayOfWeek]
+  ordinal: [VehiclePrice, Days_Policy_Accident, Days_Policy_Claim, PastNumberOfClaims,
+            AgeOfVehicle, NumberOfSuppliments, AddressChange_Claim, NumberOfCars, age_band]
+  numeric: [Deductible, DriverRating, Year, WeekOfMonth, claim_lag_weeks, claim_lag_months]
+  binary: [age_missing, early_policy_incident, price_extreme, policyholder_fault,
+           liability_only, accident_weekend, claim_weekend]
+  red_flags: true            # one indicator per red flag + weighted red-flag score
+  consistency_count: true    # number of failed consistency rules (V04-V12)
+  rare_category_min_frequency: 20
+  fairness_groups: [Sex, MaritalStatus, age_band]
+
+training:
+  synthetic_weights: [1.0, 0.3, 0.1]
+  synthetic_fractions: [0.0, 0.1, 0.25, 0.5, 1.0]
+  default_synthetic_weight: 0.3
+  fast_mode_rows: 20000

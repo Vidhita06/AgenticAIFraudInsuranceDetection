@@ -1,9 +1,17 @@
-# Pinned versions (Python 3.11). Step B pins xgboost/catboost/shap/torch to the B200 run.
+# Pinned versions (Python 3.11). The ML pins equal requirements-train.txt (the B200 run)
+# so the joblib artifacts in models/ load on a CPU laptop.
 numpy==2.4.6
 pandas==3.0.6
 scipy==1.17.1
 scikit-learn==1.9.1
 lightgbm==4.7.0
+xgboost==3.2.0
+catboost==1.2.10
+shap==0.51.0
+optuna==5.0.0
+joblib==1.6.0
+# CPU PyTorch is only needed to load an MLP artifact:
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
 pydantic==2.13.4
 PyYAML==6.0.1
 matplotlib==3.11.2
