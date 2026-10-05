@@ -397,6 +397,7 @@ def fit_model(name: str, data: TrainingData, params: Mapping[str, Any] | None = 
             model = CatBoostClassifier(
                 task_type="GPU" if gpu else "CPU", eval_metric=metric, scale_pos_weight=spw,
                 od_type="Iter", od_wait=150, use_best_model=True, random_seed=seed,
+                allow_writing_files=False,
                 verbose=False, **({"thread_count": -1} if not gpu else {}), **params)
             try:
                 model.fit(train_pool, eval_set=val_pool)
