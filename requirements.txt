@@ -16,6 +16,15 @@ pydantic==2.13.4
 PyYAML==6.0.1
 matplotlib==3.11.2
 pytest==9.1.1
+# Agent (Step C)
+langgraph==1.2.12
+langchain-core==1.6.6
+langchain-anthropic==1.7.5
+anthropic==1.11.0
+faiss-cpu==1.15.1
+pyarrow==25.0.1
+python-dotenv==1.2.2
+# Optional providers: pip install langchain-openai | langchain-ollama
 # Running the notebooks headless (jupyter nbconvert --execute)
 ipykernel==7.4.0
 nbconvert==7.17.1
