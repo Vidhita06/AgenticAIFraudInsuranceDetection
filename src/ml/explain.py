@@ -131,6 +131,8 @@ def describe_feature(name: str, raw_claim: dict[str, Any] | None = None) -> tupl
             return f"{PRETTY[base]} = {level}", raw_claim.get(base)
     if name.startswith("rf_"):
         return f"red flag {name[3:].upper()}", None
+    if name == "red_flag_score":
+        return PRETTY[name], None
     return name, raw_claim.get(name)
 
 
@@ -149,5 +151,9 @@ def top_contributions(shap_row: np.ndarray, feature_vals: np.ndarray, names: lis
         direction = "raises" if e["shap_contribution"] > 0 else "lowers"
         e["value"] = e["value"].item() if hasattr(e["value"], "item") else e["value"]
         e["shap_contribution"] = round(e["shap_contribution"], 4)
-        e["reason"] = f"{e['feature']} = {e['value']} {direction} the fraud score"
+        if e["feature"].startswith("red flag "):
+            state = "triggered" if e["value"] else "not triggered"
+            e["reason"] = f"{e['feature']} {state}; this {direction} the fraud score"
+        else:
+            e["reason"] = f"{e['feature']} = {e['value']} {direction} the fraud score"
     return out
