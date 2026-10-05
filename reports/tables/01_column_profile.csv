@@ -1,0 +1,34 @@
+column,dtype,cardinality,nulls,min,max,out_of_domain,values,real_train,synthetic,real_validation,real_test
+Month,string,12,0,,,,"Apr, Aug, Dec, Feb, Jan, Jul, Jun, Mar, May, Nov, Oct, Sep",12,12,12,12
+WeekOfMonth,int64,5,0,1,5,,"1, 2, 3, 4, 5",5,5,5,5
+DayOfWeek,string,7,0,,,,"Friday, Monday, Saturday, Sunday, Thursday, Tuesday, Wednesday",7,7,7,7
+Make,string,19,0,,,,"Accura, BMW, Chevrolet, Dodge, Ferrari, Ford, Honda, Jaguar, Lexus, Mazda, Mecedes, Mercury, Nisson, Pontiac, Porche, Saab, Saturn, Toyota, VW",18,18,15,17
+AccidentArea,string,2,0,,,,"Rural, Urban",2,2,2,2
+DayOfWeekClaimed,string,7,0,,,,"Friday, Monday, Saturday, Sunday, Thursday, Tuesday, Wednesday",7,7,7,7
+MonthClaimed,string,12,0,,,,"Apr, Aug, Dec, Feb, Jan, Jul, Jun, Mar, May, Nov, Oct, Sep",12,12,12,12
+WeekOfMonthClaimed,int64,5,0,1,5,,"1, 2, 3, 4, 5",5,5,5,5
+Sex,string,2,0,,,,"Female, Male",2,2,2,2
+MaritalStatus,string,4,0,,,,"Divorced, Married, Single, Widow",4,4,4,4
+Age,int64,66,0,0,80,,66 distinct,66,66,64,65
+Fault,string,2,0,,,,"Policy Holder, Third Party",2,2,2,2
+PolicyType,string,9,0,,,,"Sedan - All Perils, Sedan - Collision, Sedan - Liability, Sport - All Perils, Sport - Collision, Sport - Liability, Utility - All Perils, Utility - Collision, Utility - Liability",9,9,8,8
+VehicleCategory,string,3,0,,,,"Sedan, Sport, Utility",3,3,3,3
+VehiclePrice,string,6,0,,,,"20000 to 29000, 30000 to 39000, 40000 to 59000, 60000 to 69000, less than 20000, more than 69000",6,6,6,6
+FraudFound_P,int64,2,0,0,1,,"0, 1",2,2,2,2
+PolicyNumber,int64,304626,0,1,304627,,304626 distinct,10793,289207,2313,2313
+RepNumber,int64,16,0,1,16,,"1, 10, 11, 12, 13, 14, 15, 16, 2, 3, 4, 5, 6, 7, 8, 9",16,16,16,16
+Deductible,int64,4,0,300,700,,"300, 400, 500, 700",4,4,4,3
+DriverRating,int64,4,0,1,4,,"1, 2, 3, 4",4,4,4,4
+Days_Policy_Accident,string,5,0,,,,"1 to 7, 15 to 30, 8 to 15, more than 30, none",5,5,5,5
+Days_Policy_Claim,string,3,0,,,,"15 to 30, 8 to 15, more than 30",3,3,3,3
+PastNumberOfClaims,string,4,0,,,,"1, 2 to 4, more than 4, none",4,4,4,4
+AgeOfVehicle,string,8,0,,,,"2 years, 3 years, 4 years, 5 years, 6 years, 7 years, more than 7, new",8,8,8,8
+AgeOfPolicyHolder,string,9,0,,,,"16 to 17, 18 to 20, 21 to 25, 26 to 30, 31 to 35, 36 to 40, 41 to 50, 51 to 65, over 65",9,9,9,9
+PoliceReportFiled,string,2,0,,,,"No, Yes",2,2,2,2
+WitnessPresent,string,2,0,,,,"No, Yes",2,2,2,2
+AgentType,string,2,0,,,,"External, Internal",2,2,2,2
+NumberOfSuppliments,string,4,0,,,,"1 to 2, 3 to 5, more than 5, none",4,4,4,4
+AddressChange_Claim,string,5,0,,,,"1 year, 2 to 3 years, 4 to 8 years, no change, under 6 months",5,5,5,4
+NumberOfCars,string,5,0,,,,"1 vehicle, 2 vehicles, 3 to 4, 5 to 8, more than 8",5,5,4,4
+Year,int64,3,0,1994,1996,,"1994, 1995, 1996",3,3,3,3
+BasePolicy,string,3,0,,,,"All Perils, Collision, Liability",3,3,3,3

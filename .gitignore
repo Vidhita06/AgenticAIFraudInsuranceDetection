@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+
+# Derived data and large outputs
+data/interim/*
+data/features/*
+!data/interim/.gitkeep
+!data/features/.gitkeep
+models/*.joblib
+models/*.pt
+models/*.faiss
+mlruns/
+runs/
+*.log

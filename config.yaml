@@ -1,0 +1,29 @@
+# Central configuration: paths and parameters shared across phases.
+random_state: 42
+
+paths:
+  raw: data/raw/vehicle_fraud_oracle.csv
+  augmented_train: data/processed/augmented_train_300k.csv
+  real_validation: data/processed/real_validation.csv
+  real_test: data/processed/real_test.csv
+  interim_dir: data/interim
+  features_dir: data/features
+  models_dir: models
+  reports_dir: reports
+  figures_dir: reports/figures
+  tables_dir: reports/tables
+
+data:
+  target: FraudFound_P
+  id_column: PolicyNumber
+  origin_column: is_synthetic
+  # Never used as model features (PolicyNumber is a perfect proxy for is_synthetic).
+  never_features: [PolicyNumber, is_synthetic]
+  # Kept under review until Phase 2/3 assessment.
+  review_features: [RepNumber]
+  real_policy_number_max: 15420
+  invalid_policy_number: 1517
+
+metrics:
+  bootstrap_iterations: 2000
+  ci_level: 0.95
