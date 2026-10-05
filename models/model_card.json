@@ -1,0 +1,335 @@
+{
+  "model_version": "xgboost-fast-20261005-1215",
+  "placeholder": true,
+  "family": "xgboost",
+  "n_seed_members": 1,
+  "params": {
+    "n_estimators": 600,
+    "learning_rate": 0.05092911283433821,
+    "max_depth": 8,
+    "subsample": 0.9849549260809971,
+    "colsample_bytree": 0.899465584480253,
+    "min_child_weight": 1.0838581269344745,
+    "reg_lambda": 0.00892622738184373,
+    "reg_alpha": 0.0008111941985431928,
+    "gamma": 0.0007274653135669422
+  },
+  "preprocessor_kind": "tree",
+  "features": [
+    "Fault_Policy Holder",
+    "Fault_Third Party",
+    "BasePolicy_All Perils",
+    "BasePolicy_Collision",
+    "BasePolicy_Liability",
+    "VehicleCategory_Sedan",
+    "VehicleCategory_Sport",
+    "VehicleCategory_Utility",
+    "AgentType_External",
+    "AgentType_Internal",
+    "AccidentArea_Rural",
+    "AccidentArea_Urban",
+    "Make_Accura",
+    "Make_Chevrolet",
+    "Make_Dodge",
+    "Make_Ford",
+    "Make_Honda",
+    "Make_Mazda",
+    "Make_Mercury",
+    "Make_Nisson",
+    "Make_Pontiac",
+    "Make_Saab",
+    "Make_Saturn",
+    "Make_Toyota",
+    "Make_VW",
+    "Make_infrequent_sklearn",
+    "PoliceReportFiled_No",
+    "PoliceReportFiled_Yes",
+    "WitnessPresent_No",
+    "WitnessPresent_Yes",
+    "Month_Apr",
+    "Month_Aug",
+    "Month_Dec",
+    "Month_Feb",
+    "Month_Jan",
+    "Month_Jul",
+    "Month_Jun",
+    "Month_Mar",
+    "Month_May",
+    "Month_Nov",
+    "Month_Oct",
+    "Month_Sep",
+    "DayOfWeek_Friday",
+    "DayOfWeek_Monday",
+    "DayOfWeek_Saturday",
+    "DayOfWeek_Sunday",
+    "DayOfWeek_Thursday",
+    "DayOfWeek_Tuesday",
+    "DayOfWeek_Wednesday",
+    "VehiclePrice",
+    "Days_Policy_Accident",
+    "Days_Policy_Claim",
+    "PastNumberOfClaims",
+    "AgeOfVehicle",
+    "NumberOfSuppliments",
+    "AddressChange_Claim",
+    "NumberOfCars",
+    "age_band",
+    "Deductible",
+    "DriverRating",
+    "Year",
+    "WeekOfMonth",
+    "claim_lag_weeks",
+    "claim_lag_months",
+    "age_missing",
+    "early_policy_incident",
+    "price_extreme",
+    "policyholder_fault",
+    "liability_only",
+    "accident_weekend",
+    "claim_weekend",
+    "rf_rf01",
+    "rf_rf02",
+    "rf_rf03",
+    "rf_rf04",
+    "rf_rf05",
+    "rf_rf07",
+    "rf_rf08",
+    "rf_rf09",
+    "rf_rf10",
+    "rf_rf11",
+    "rf_rf12",
+    "rf_rf13",
+    "red_flag_score",
+    "consistency_failures"
+  ],
+  "excluded_features": [
+    "PolicyNumber",
+    "is_synthetic",
+    "PolicyType",
+    "AgeOfPolicyHolder",
+    "RepNumber",
+    "Sex",
+    "MaritalStatus",
+    "Age",
+    "MonthClaimed",
+    "DayOfWeekClaimed",
+    "WeekOfMonthClaimed"
+  ],
+  "training_data": {
+    "description": "real + 100% synthetic (w=1.0)",
+    "mix": {
+      "synthetic_fraction": 1.0,
+      "synthetic_weight": 1.0
+    },
+    "rows": 19999
+  },
+  "calibration": {
+    "uncalibrated_brier": 0.15189597010612488,
+    "method": "sigmoid",
+    "sigmoid": {
+      "brier": 0.0504748221329267,
+      "pr_auc": 0.24247024060059597
+    },
+    "isotonic": {
+      "brier": 0.05141638734382437,
+      "pr_auc": 0.21550902132174207
+    }
+  },
+  "thresholds": {
+    "cost_10to1": {
+      "cost_ratio": 10,
+      "threshold": 0.11788880750536919,
+      "bayes_threshold": 0.09090909090909091,
+      "cost_per_claim": 0.3476005188067445,
+      "flag_rate": 0.2127107652399481,
+      "precision": 0.1991869918699187,
+      "recall": 0.7050359712230215
+    },
+    "cost_5to1": {
+      "cost_ratio": 5,
+      "threshold": 0.16568653404712677,
+      "bayes_threshold": 0.16666666666666666,
+      "cost_per_claim": 0.24427150886294854,
+      "flag_rate": 0.12019022913964549,
+      "precision": 0.2446043165467626,
+      "recall": 0.4892086330935252
+    },
+    "cost_20to1": {
+      "cost_ratio": 20,
+      "threshold": 0.07207935452461242,
+      "bayes_threshold": 0.047619047619047616,
+      "cost_per_claim": 0.4773022049286641,
+      "flag_rate": 0.3376567228707307,
+      "precision": 0.14980793854033292,
+      "recall": 0.841726618705036
+    },
+    "capacity_top_10pct": {
+      "threshold": 0.17886978983879098,
+      "precision": 0.2413793103448276,
+      "recall": 0.4028776978417266,
+      "flag_rate": 0.10030263726761782
+    }
+  },
+  "risk_bands": {
+    "medium": 0.07207935452461242,
+    "high": 0.11788880750536919
+  },
+  "decision_policy": {
+    "high": "FLAG_FOR_INVESTIGATION candidate (score >= high band)",
+    "blocking_validation_failure": "REQUEST_MORE_INFO",
+    "otherwise": "APPROVE (always subject to adjuster review)"
+  },
+  "validation_metrics": {
+    "roc_auc": 0.8353199684962243,
+    "pr_auc": 0.24247024060059597,
+    "brier": 0.0504748221329267,
+    "recall_at_precision_0.3": 0.2014388489208633,
+    "precision_at_top_5pct": 0.27586206896551724,
+    "precision_at_top_10pct": 0.24242424242424243
+  },
+  "evaluation": {
+    "split": "real_validation",
+    "n": 2313,
+    "fraud": 139,
+    "metrics": [
+      {
+        "metric": "roc_auc",
+        "value": 0.8389832752013661,
+        "lo": 0.8161585910664294,
+        "hi": 0.8669705082300305
+      },
+      {
+        "metric": "pr_auc",
+        "value": 0.2481718900034678,
+        "lo": 0.20148276937577458,
+        "hi": 0.327505706572389
+      },
+      {
+        "metric": "brier",
+        "value": 0.050351060926914215,
+        "lo": 0.0485307446680963,
+        "hi": 0.05187423378229141
+      },
+      {
+        "metric": "recall_at_precision_0.3",
+        "value": 0.16546762589928057,
+        "lo": 0.06438848920863315,
+        "hi": 0.5111510791366908
+      },
+      {
+        "metric": "precision_at_top_5pct",
+        "value": 0.2672413793103448,
+        "lo": 0.20668103448275865,
+        "hi": 0.3448275862068966
+      },
+      {
+        "metric": "precision_at_top_10pct",
+        "value": 0.2554112554112554,
+        "lo": 0.21212121212121213,
+        "hi": 0.2988095238095238
+      },
+      {
+        "metric": "accuracy",
+        "value": 0.8123648940769563,
+        "lo": 0.7946281884997838,
+        "hi": 0.8261997405966277
+      },
+      {
+        "metric": "precision",
+        "value": 0.1983640081799591,
+        "lo": 0.17971523167592468,
+        "hi": 0.2219873150105708
+      },
+      {
+        "metric": "recall",
+        "value": 0.697841726618705,
+        "lo": 0.6329136690647482,
+        "hi": 0.7769784172661871
+      },
+      {
+        "metric": "f1",
+        "value": 0.3089171974522293,
+        "lo": 0.2795629886604878,
+        "hi": 0.34324099407204745
+      },
+      {
+        "metric": "f2",
+        "value": 0.4641148325358852,
+        "lo": 0.42528143674483865,
+        "hi": 0.5152794789912292
+      },
+      {
+        "metric": "fpr",
+        "value": 0.18031278748850046,
+        "lo": 0.16513339466421342,
+        "hi": 0.19873505059797608
+      },
+      {
+        "metric": "flag_rate",
+        "value": 0.21141374837872892,
+        "lo": 0.19670341547773454,
+        "hi": 0.23087980977086037
+      },
+      {
+        "metric": "threshold",
+        "value": 0.11788880750536919,
+        "lo": NaN,
+        "hi": NaN
+      },
+      {
+        "metric": "tp",
+        "value": 97.0,
+        "lo": NaN,
+        "hi": NaN
+      },
+      {
+        "metric": "fp",
+        "value": 392.0,
+        "lo": NaN,
+        "hi": NaN
+      },
+      {
+        "metric": "fn",
+        "value": 42.0,
+        "lo": NaN,
+        "hi": NaN
+      },
+      {
+        "metric": "tn",
+        "value": 1782.0,
+        "lo": NaN,
+        "hi": NaN
+      }
+    ],
+    "success_criterion": {
+      "precision_lo": 0.17971523167592468,
+      "random_precision": 0.06009511456982274,
+      "recall_lo": 0.6329136690647482,
+      "random_recall_at_same_flag_rate": 0.21141374837872892,
+      "met": true
+    }
+  },
+  "data_sha256": {
+    "data/raw/fraud_oracle.csv": "d7dab6086aa186fc82c607d50919067a1599cea45afb4965511fd7da9e935e09",
+    "data/processed/augmented_train_300k.csv": "8dea8f3b22c3be9eabc919ecf99d1ad3a9794c630725112de53491d990818368",
+    "data/processed/real_validation.csv": "9e106895a4ffd74d7d55395791e2822a070668330f7598dd41f7e9ce200fc18c",
+    "data/processed/real_test.csv": "9c10316ddd106b421674f01e193b824ab538120d2fbac66858c1af2ba3a7371b"
+  },
+  "trained_at": "2026-10-05T12:15:08",
+  "device": "cpu",
+  "environment": {
+    "python": "3.11.15",
+    "sklearn": "1.9.1",
+    "numpy": "2.4.6",
+    "pandas": "3.0.6",
+    "xgboost": "3.2.0",
+    "lightgbm": "4.7.0",
+    "catboost": "1.2.10",
+    "shap": "0.51.0",
+    "optuna": "5.0.0",
+    "torch": "2.14.1+cu130",
+    "joblib": "1.6.0",
+    "cuda_available": false
+  },
+  "fast_mode": true
+}

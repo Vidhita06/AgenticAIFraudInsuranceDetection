@@ -35,4 +35,6 @@ def sha256_file(path: str | Path, chunk_size: int = 1 << 20) -> str:
 def input_hashes() -> dict[str, str]:
     """SHA-256 of every input data file, for logging in reports and model metadata."""
     keys = ["raw", "augmented_train", "real_validation", "real_test"]
-    return {load_config()["paths"][k]: sha256_file(path_for(k)) for k in keys}
+    # The B200 bundle ships data/processed only, so absent files are recorded, not required.
+    return {load_config()["paths"][k]: sha256_file(path_for(k)) if path_for(k).exists() else "missing"
+            for k in keys}

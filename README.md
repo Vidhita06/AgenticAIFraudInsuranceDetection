@@ -31,20 +31,29 @@ docs/
   synopsis_requirements.md  checklist of synopsis objectives, deliverables, metrics
   report/                   01_data_audit.md, tables/, figures/
 notebooks/01_eda.ipynb      EDA and synthetic-data audit (thin wrapper over src/)
+notebooks/02_model_training.ipynb   B200 training notebook (Run All; see below)
+models/                     preprocessor, calibrated model, SHAP explainer, model card
+b200_bundle.zip             upload bundle for the B200 (built by scripts/make_b200_bundle.py)
 prompts/                    the work-plan prompt
 src/
   config.py                 settings loader, input-file SHA-256 hashes
   ml/data.py                explicit-dtype loaders, category sets and natural orders
   ml/audit.py               Phase 1 profiling, fact checks, report builder
-  ml/evaluate.py            statistics helpers (Wilson CI; metrics follow in Step B)
+  ml/eda.py, ml/synthetic_audit.py   Step A analysis code
+  ml/preprocess.py          feature builder + preprocessors (single source of truth)
+  ml/train.py               model zoo, data mix, Optuna, calibration, TrainingRun
+  ml/evaluate.py            metrics with bootstrap CIs, thresholds, lift, fairness
+  ml/predict.py, ml/explain.py   CPU scoring and SHAP explanations from models/
+  validation/feature_engineering.py  engineered features
   validation/validators.py  missing/invalid-field rules and the rule engine
   validation/consistency_rules.py  timeline and logic rules
 scripts/run_phase1_audit.py rebuilds docs/report/01_data_audit.md
+scripts/make_b200_bundle.py, scripts/train_model.py   B200 bundle; headless training
 tests/test_validation.py    rules, YAML-vs-code consistency, data-loading checks
 ```
 
-Steps A–D add the rest of the target layout: the training notebook and B200 bundle, `models/`,
-`src/schemas`, `src/ingestion`, `src/retrieval`, `src/tools`, `src/agent` and `evaluation/`.
+Steps C–D add `src/schemas`, `src/ingestion`, `src/retrieval`, `src/tools`, `src/agent` and
+`evaluation/`.
 
 ## Setup
 
@@ -54,7 +63,78 @@ pip install -r requirements.txt
 pytest -q
 python -m src.ml.data --write-real-train   # regenerates data/processed/real_train.csv
 python scripts/run_phase1_audit.py         # regenerates docs/report/01_data_audit.md
+jupyter nbconvert --to notebook --execute --inplace notebooks/01_eda.ipynb   # Step A (~10 min CPU)
 ```
+
+## Training on the B200 (Step B)
+
+`notebooks/02_model_training.ipynb` runs top to bottom with *Run All*. It reads everything it
+needs from `b200_bundle.zip`:
+
+- `src/`, `config/`, `data/processed/*.csv` and `requirements-train.txt`;
+- `MANIFEST.json`, which records the git commit and the SHA-256 of every file.
+
+**1. Get the files.** Download two files from the branch (or PR): `b200_bundle.zip` (repo
+root) and `notebooks/02_model_training.ipynb`. To rebuild the bundle from a checkout, run
+`python scripts/make_b200_bundle.py`.
+
+**2. Upload.** In the B200 Jupyter file browser, create an empty folder (e.g. `fraud_b200/`)
+and upload both files into it, side by side. Do not unzip the bundle: the notebook does that
+itself.
+
+**3. Pick the kernel.** Use the server's default Python 3 kernel, the one with the
+preinstalled CUDA PyTorch. Do not `pip install torch`. The B200 (Blackwell, sm_100) needs a
+CUDA 12.8+ build, and the notebook checks this for you.
+
+**4. Configure (optional).** The first code cell is the only one to edit:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `FAST_MODE` | `False` | Leave off on the server. |
+| `N_TRIALS` | `80` | Optuna trials per finalist. Fewer is faster: about 30 for a quick pass. |
+| `TUNE_TOP` | `2` | Number of model families to tune. |
+| `MODELS` | all five | Drop `"mlp"` or `"catboost"` to save time. |
+| `RESUME` | `True` | Keep on. A rerun after a disconnect reuses finished models and Optuna trials. |
+
+**5. Run All.** The notebook:
+
+1. unpacks the bundle;
+2. installs `requirements-train.txt`, with every preinstalled torch/CUDA/numpy package pinned
+   so pip cannot change them;
+3. prints `nvidia-smi` and an environment report, and stops early with a clear message if
+   the GPU, sm_100 or bf16 is unusable;
+4. runs baselines → data-mix experiment → model zoo → Optuna → final seed ensemble →
+   calibration → thresholds → **one** test evaluation → SHAP, error analysis and fairness →
+   CPU export.
+
+Each finished model is checkpointed to `outputs/checkpoints/`. If the kernel dies, choose
+*Run All* again. Expect roughly 1–3 h with the defaults; most of it is Optuna.
+
+**6. Download.** The last cell prints `DOWNLOAD THIS FILE: …/b200_outputs_<timestamp>.zip`
+(next to the notebook). Download it before the server is reclaimed. It contains:
+
+- `outputs/models/`: the artifacts (`preprocessor.joblib`, `fraud_model.joblib`,
+  `shap_explainer.pkl`, `model_card.json`);
+- `figures/`, `tables/`, `run_log.csv` / `run_log.txt` and `optuna.db`.
+
+**7. Bring it back.** Unzip it in the repo root and copy `outputs/models/*` into `models/`.
+The artifacts are saved for CPU inference and load with `requirements.txt` (same sklearn,
+xgboost, catboost, lightgbm and shap pins). If the MLP wins, CPU torch is also needed.
+
+**Verify locally:**
+
+```bash
+python -c "from src.ml.predict import load_artifacts, score_claims; from src.ml.data import load_real_validation; print(score_claims(load_real_validation().head(3), load_artifacts()))"
+```
+
+The `models/` files currently in the repo are **FAST_MODE placeholders**: a 20k-row CPU run
+with `"placeholder": true` in `model_card.json`. They exist so Step C can be built and tested;
+the B200 artifacts replace them. `docs/report/02_model_training_fast_mode_run.ipynb` is the
+executed FAST_MODE smoke test of the same notebook. In FAST_MODE the evaluation section uses
+real validation as a stand-in, so `real_test.csv` stays unopened until the B200 run.
+
+**Headless alternative** (no Jupyter): `python scripts/train_model.py --trials 80`, or
+`--fast` for a CPU smoke test.
 
 ## Data
 
