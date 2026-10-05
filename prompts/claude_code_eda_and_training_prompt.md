@@ -58,13 +58,15 @@ as clean, explainable, callable tools.
    - `Age = 0` (missing-age sentinel, higher fraud risk): 232 real-train rows,
      5,242 synthetic.
    - `PolicyType` ≠ `VehicleCategory + " - " + BasePolicy` in ~32% of rows in both
-     real and synthetic data — a known inconsistency in the original data.
+     real and synthetic data. It is one pattern only: Sport vehicles on Liability
+     policies are always recorded as "Sedan - Liability", so `PolicyType` adds
+     nothing beyond `VehicleCategory` + `BasePolicy`.
    - Year distribution is similar across splits (1994 > 1995 > 1996).
    - Strong univariate signals: `Fault` (Policy Holder 7.82% vs Third Party 1.17%),
      `BasePolicy` (All Perils 10.28%, Collision 7.11%, Liability 0.77%),
      `VehicleCategory` (Utility 11.04%, Sedan 8.28%, Sport 1.42%), `VehiclePrice`
      extremes (<20k 8.48%, >69k 7.94%), `PoliceReportFiled`, `AgentType`.
-   - `Deductible` is 400 for ~93% of rows; `DriverRating` is uniform over 1–4.
+   - `Deductible` is 400 for ~96% of rows; `DriverRating` is uniform over 1–4.
 
 ## 1. Non-negotiable rules (apply in every phase)
 
@@ -103,7 +105,9 @@ as clean, explainable, callable tools.
    violation counts per split and origin:
    - Required fields present, values inside the known category sets.
    - `Age = 0` → missing age (→ "Request More Information" candidate).
-   - `Age` inside the `AgeOfPolicyHolder` bin.
+   - `AgeOfPolicyHolder` consistent with `Age` using the mapping the data actually
+     uses (the bands are shifted, e.g. Age 26–35 → "31 to 35", Age 0 → "16 to 17"),
+     not the literal band labels.
    - `PolicyType` consistent with `VehicleCategory` + `BasePolicy`.
    - Claim not before accident: `MonthClaimed`/`WeekOfMonthClaimed` vs
      `Month`/`WeekOfMonth`, allowing year wrap-around.
