@@ -1,9 +1,14 @@
-# Pinned versions (Python 3.11). Later phases add model/agent packages.
+# Pinned versions (Python 3.11). Step B pins xgboost/catboost/shap/torch to the B200 run.
 numpy==2.4.6
 pandas==3.0.6
 scipy==1.17.1
 scikit-learn==1.9.1
+lightgbm==4.7.0
 pydantic==2.13.4
 PyYAML==6.0.1
 matplotlib==3.11.2
 pytest==9.1.1
+# Running the notebooks headless (jupyter nbconvert --execute)
+ipykernel==7.4.0
+nbconvert==7.17.1
+nbclient==0.11.0

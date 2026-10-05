@@ -187,3 +187,58 @@ def test_raw_invalid_row_is_caught():
     res = run_rules(raw)
     bad = raw.loc[~res["V02_DOMAIN_VALUES"], "PolicyNumber"].tolist()
     assert bad == [1517]
+
+
+# ---------------------------------------------------------------------------
+# Red flags and engineered features
+# ---------------------------------------------------------------------------
+from src.validation.feature_engineering import add_engineered_features, age_band, claim_lag_weeks  # noqa: E402
+from src.validation.validators import evaluate_red_flags, load_red_flags, red_flag_frame  # noqa: E402
+
+
+def test_red_flags_load_and_have_valid_columns():
+    flags = load_red_flags()
+    assert len(flags) >= 10
+    assert len({f.rule_id for f in flags}) == len(flags)
+    assert all(f.rule_id.startswith("RF") for f in flags)
+
+
+def test_red_flag_fires_on_matching_claim():
+    claim = {**VALID_CLAIM, "Fault": "Third Party", "Deductible": 500}
+    fired = {r["rule_id"] for r in evaluate_red_flags(claim)}
+    assert {"RF03_DEDUCTIBLE_500", "RF04_THIRD_PARTY_DEDUCTIBLE_500"} <= fired
+    for r in evaluate_red_flags(claim):
+        assert set(r) == {"rule_id", "severity", "condition", "message", "stats"}
+
+
+def test_red_flags_quiet_on_low_risk_claim():
+    claim = {**VALID_CLAIM, "Fault": "Third Party", "BasePolicy": "Liability",
+             "VehicleCategory": "Sport", "PolicyType": "Sedan - Liability"}
+    assert evaluate_red_flags(claim) == []
+
+
+def test_red_flag_frame_matches_single_claim():
+    claims = [VALID_CLAIM, {**VALID_CLAIM, "Age": 0, "AgeOfPolicyHolder": "16 to 17",
+                            "BasePolicy": "All Perils", "PolicyType": "Sedan - All Perils"}]
+    frame = red_flag_frame(pd.DataFrame(claims))
+    for i, claim in enumerate(claims):
+        assert set(frame.columns[frame.iloc[i]]) == {r["rule_id"] for r in evaluate_red_flags(claim)}
+    assert frame.loc[1, "RF08_MISSING_AGE_ALL_PERILS"]
+
+
+def test_engineered_features():
+    df = pd.DataFrame([VALID_CLAIM,
+                       {**VALID_CLAIM, "Age": 0, "Month": "Dec", "WeekOfMonth": 5, "MonthClaimed": "Jan",
+                        "WeekOfMonthClaimed": 1, "DayOfWeek": "Sunday", "Days_Policy_Accident": "none",
+                        "VehiclePrice": "more than 69000"}])
+    out = add_engineered_features(df)
+    assert out["age_missing"].tolist() == [0, 1]
+    assert out["age_band"].tolist() == ["41-50", "missing"]
+    assert out["claim_lag_months"].tolist() == [0, 1]
+    assert out["claim_lag_weeks"].iloc[0] == 1
+    assert 0 < out["claim_lag_weeks"].iloc[1] < 1          # Dec week 5 -> Jan week 1
+    assert out["accident_weekend"].tolist() == [0, 1]
+    assert out["early_policy_incident"].tolist() == [0, 1]
+    assert out["price_extreme"].tolist() == [0, 1]
+    assert len(df.columns) < len(out.columns)                  # input not modified
+    assert age_band(pd.Series([16, 20, 21, 66])).tolist() == ["16-20", "16-20", "21-25", "66+"]

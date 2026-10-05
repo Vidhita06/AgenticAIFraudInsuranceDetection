@@ -194,3 +194,60 @@ def rule_hit_summary(df: pd.DataFrame, target: str = "FraudFound_P") -> pd.DataF
             rec["fraud_violators"] = int(y[hit].sum())
         rows.append(rec)
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Red flags (type: red_flag in policy_rules.yaml)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RedFlag:
+    rule_id: str
+    severity: str
+    when: Mapping[str, list]
+    condition: str
+    explanation: str
+    stats: Mapping[str, Any] = field(default_factory=dict)
+
+
+def load_red_flags(path: str | None = None) -> tuple[RedFlag, ...]:
+    spec = load_policy_rules(path)
+    flags = []
+    for r in spec.get("red_flags") or []:
+        if r.get("type") != "red_flag" or r["severity"] not in SEVERITIES:
+            raise ValueError(f"Invalid red flag {r.get('id')}")
+        unknown = [c for c in r["when"] if c not in CLAIM_FIELDS]
+        if unknown:
+            raise ValueError(f"{r['id']}: unknown columns {unknown}")
+        flags.append(RedFlag(r["id"], r["severity"], r["when"], r["condition"].strip(),
+                             " ".join(r["explanation"].split()), r.get("stats") or {}))
+    return tuple(flags)
+
+
+def condition_mask(df: pd.DataFrame, when: Mapping[str, list]) -> pd.Series:
+    """True where every `when` column takes one of its listed values."""
+    mask = pd.Series(True, index=df.index)
+    for col, allowed in when.items():
+        mask &= df[col].isin(allowed).fillna(False).astype(bool)
+    return mask
+
+
+def red_flag_frame(df: pd.DataFrame, flags: tuple[RedFlag, ...] | None = None) -> pd.DataFrame:
+    """Boolean frame (rows x red-flag id), True = flag fires."""
+    flags = load_red_flags() if flags is None else flags
+    df = _prepare(df)
+    return pd.DataFrame({f.rule_id: condition_mask(df, f.when) for f in flags}, index=df.index)
+
+
+def evaluate_red_flags(claim: Mapping[str, Any],
+                       flags: tuple[RedFlag, ...] | None = None) -> list[dict[str, Any]]:
+    """Red flags that fire for one claim: [{rule_id, severity, condition, message, stats}]."""
+    flags = load_red_flags() if flags is None else flags
+    row = pd.DataFrame([{f: claim.get(f) for f in CLAIM_FIELDS}])
+    for col in INTEGER_DOMAINS:
+        if col in row:
+            row[col] = pd.to_numeric(row[col], errors="coerce")
+    fired = red_flag_frame(row, flags).iloc[0]
+    return [{"rule_id": f.rule_id, "severity": f.severity, "condition": f.condition,
+             "message": f.explanation, "stats": dict(f.stats)}
+            for f in flags if bool(fired[f.rule_id])]
