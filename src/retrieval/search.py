@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 
 from src.config import path_for
-from src.retrieval.build_index import KEY_FIELDS
+from src.config import sha256_file
+from src.retrieval.build_index import KEY_FIELDS, StaleIndexError, check_index_fresh
 
 
 class SimilarClaimSearcher:
@@ -25,8 +26,12 @@ class SimilarClaimSearcher:
         d = Path(directory) if directory else path_for("vector_store_dir")
         if not (d / "claims.faiss").exists():
             raise FileNotFoundError(f"No index in {d}. Run: python scripts/build_vector_index.py")
+        info = json.loads((d / "index_meta.json").read_text())
+        check_index_fresh(info)
+        if info.get("encoder_sha256") and sha256_file(d / "encoder.joblib") != info["encoder_sha256"]:
+            raise StaleIndexError("encoder.joblib does not match the index; rebuild the index")
         return cls(faiss.read_index(str(d / "claims.faiss")), pd.read_parquet(d / "claims_meta.parquet"),
-                   joblib.load(d / "encoder.joblib"), json.loads((d / "index_meta.json").read_text()))
+                   joblib.load(d / "encoder.joblib"), info)
 
     def search(self, claim: Mapping[str, Any], k: int = 5) -> list[dict[str, Any]]:
         q = self.encoder.encode(claim)

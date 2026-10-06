@@ -102,3 +102,26 @@ def test_parser_and_normalizer(sample_claims, tmp_path):
     bad = normalize_claim({**sample_claims[0], "Make": "Tesla"})
     assert not bad.ok and any("Make" in i for i in bad.invalid)
     assert isinstance(ClaimSchema(**sample_claims[0]).claim_id, str)
+
+
+def test_index_matches_current_model_and_rules(vector_store):
+    """Fails if models/, the policy rules or the feature config changed after the index was
+    built: rerun scripts/build_vector_index.py."""
+    import json as _json
+    from src.retrieval.build_index import check_index_fresh
+    check_index_fresh(_json.loads((vector_store / "index_meta.json").read_text()))
+
+
+def test_stale_index_is_refused(vector_store, monkeypatch):
+    import json as _json
+    from src.retrieval import build_index as bi
+    from src.retrieval.search import SimilarClaimSearcher
+    info = _json.loads((vector_store / "index_meta.json").read_text())
+    monkeypatch.setattr(bi, "dependency_fingerprint",
+                        lambda: {**info["dependencies"], "model_preprocessor_sha256": "different"})
+    with pytest.raises(bi.StaleIndexError):
+        bi.check_index_fresh(info)
+    from src.retrieval import search as srch
+    monkeypatch.setattr(srch, "check_index_fresh", bi.check_index_fresh)
+    with pytest.raises(bi.StaleIndexError):
+        SimilarClaimSearcher.load(vector_store)
