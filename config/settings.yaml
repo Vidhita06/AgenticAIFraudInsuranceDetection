@@ -67,3 +67,24 @@ training:
   synthetic_fractions: [0.0, 0.1, 0.25, 0.5, 1.0]
   default_synthetic_weight: 0.3
   fast_mode_rows: 20000
+
+# Claude API list prices (USD per million tokens), used for cost estimates and reports.
+# Thinking tokens are billed as output tokens.
+llm_pricing_usd_per_mtok:
+  claude-sonnet-5-5: {input: 2.0, output: 10.0}
+  claude-opus-5-5: {input: 4.0, output: 20.0}
+  claude-haiku-4-5: {input: 1.0, output: 5.0}
+  claude-haiku-4-5-20251001: {input: 1.0, output: 5.0}
+
+evaluation:
+  pilot_claims: 5             # validation claims for the measured-cost pilot
+  legit_per_fraud: 1          # final sample: all test frauds + this many legit per fraud
+  consistency_claims: 20      # re-run this many claims...
+  consistency_runs: 3         # ...this many times in total
+  judge_claims: 40            # LLM-as-judge rubric on this many rationales
+  manual_review_claims: 20    # exported for hand review
+  # Static estimate assumptions (replaced by measured values once a pilot has run)
+  est_output_tokens_agent_call: 900
+  est_output_tokens_synthesis: 1500
+  est_agent_calls_per_claim: 3
+  est_safety_margin: 1.3

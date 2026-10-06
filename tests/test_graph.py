@@ -142,3 +142,90 @@ def test_human_review_interrupt_and_resume(sample_claims, tmp_path):
     assert [json.loads(l)["event"] for l in lines] == ["recommendation", "adjuster_decision"]
     with pytest.raises(Exception):
         r.resume(tid, {"decision": "MAYBE"})                  # invalid adjuster decision
+
+
+# ---------------------------------------------------------------------------
+# Agent evaluation plumbing (evaluation/agent_eval.py) with the scripted model
+# ---------------------------------------------------------------------------
+import pandas as pd  # noqa: E402
+
+from evaluation import agent_eval as ae  # noqa: E402
+
+
+def with_usage(msg, tin=1000, tout=200):
+    msg.usage_metadata = {"input_tokens": tin, "output_tokens": tout, "total_tokens": tin + tout}
+    return msg
+
+
+def test_run_batch_records_usage_cost_and_model_only_decision(sample_claims, tmp_path):
+    claims = pd.DataFrame([{**sample_claims[0], "FraudFound_P": 0}, {**sample_claims[1], "FraudFound_P": 1}])
+    llm = scripted(with_usage(AIMessage(content="done")),
+                   with_usage(answer("APPROVE", ("fraud_score", "Fraud probability 0.0312")), 2000, 500),
+                   with_usage(tool_call("find_similar_claims", {"k": 3})), with_usage(AIMessage(content="done")),
+                   with_usage(answer("FLAG_FOR_INVESTIGATION", ("similar_claims", "2 of 3 similar claims were fraud")), 2000, 500))
+    r = runner(llm)
+    out = tmp_path / "res.jsonl"
+    recs = ae.run_batch(claims, r, "validation", out, model_name="claude-sonnet-5-5", progress=lambda m: None)
+    assert [x["decision"] for x in recs] == ["APPROVE", "FLAG_FOR_INVESTIGATION"]
+    assert recs[0]["input_tokens"] == 3000 and recs[0]["output_tokens"] == 700 and recs[0]["llm_calls"] == 2
+    assert recs[0]["cost_usd"] == pytest.approx((3000 * 2 + 700 * 10) / 1e6)
+    assert recs[1]["tools_called"] == ["find_similar_claims"]
+    assert recs[0]["model_only_decision"] == "APPROVE"            # low band stub
+    df = ae.load_results([out])
+    assert len(df) == 2 and set(df.label) == {0, 1}
+    s = ae.summarize(df)
+    dq = s["decision_quality"].set_index(["policy", "metric"])
+    assert dq.loc[("agent", "fraud -> FLAG (recall)"), "rate"] == 1.0
+    assert dq.loc[("model-only threshold policy", "fraud -> FLAG (recall)"), "rate"] == 0.0
+    assert s["process"]["tool_use_rate"]["find_similar_claims"] == 0.5
+    path = ae.write_report(s, tmp_path / "report.md", "Test report", {"model": "fake"})
+    assert "Decision quality" in path.read_text()
+
+
+def test_consistency_and_manual_review(tmp_path):
+    rows = []
+    for pn, decisions in ((1, ["APPROVE"] * 3), (2, ["APPROVE", "FLAG_FOR_INVESTIGATION", "APPROVE"])):
+        for k, d in enumerate(decisions):
+            rows.append({"policy_number": pn, "run_index": k, "decision": d, "label": pn - 1, "claim_id": f"PN-{pn}",
+                         "fraud_probability": 0.1, "risk_band": "low", "model_only_decision": "APPROVE",
+                         "decided_by": "llm", "rationale": "r", "evidence": [], "guardrail_notes": [], "tools_called": []})
+    df = pd.DataFrame(rows)
+    c = ae.consistency(df)
+    assert c == {"claims": 2, "runs_per_claim": 3, "identical_decision_share": 0.5, "unstable_claims": [2]}
+    m = ae.manual_review_sample(df, n=2)
+    assert len(m) == 2 and "reviewer_notes" in m.columns
+
+
+def test_stratified_sample_and_estimate():
+    from src.ml.data import load_real_validation
+    v = load_real_validation()
+    s = ae.stratified_sample(v, legit_per_fraud=1)
+    assert s.FraudFound_P.sum() == v.FraudFound_P.sum() == len(s) / 2
+    assert s.attrs["legit_weight"] == pytest.approx((len(v) - 139) / 139)
+    est = ae.estimate_cost(s.head(10), "claude-sonnet-5-5", n_runs=10, n_judge=2)
+    assert est.usd > 0 and est.per_claim_usd > 0 and "static" in est.basis
+    meas = ae.estimate_cost(s.head(10), "claude-sonnet-5-5", 10,
+                            measured={"input_tokens": 10_000, "output_tokens": 1_000})
+    assert meas.usd == pytest.approx(10 * (10_000 * 2 + 1_000 * 10) / 1e6)
+    with pytest.raises(KeyError):
+        ae.pricing("unknown-model")
+
+
+def test_confirm_requires_explicit_yes():
+    assert ae.confirm("cost $1", assume_yes=False, input_fn=lambda _: "y") is True
+    assert ae.confirm("cost $1", assume_yes=False, input_fn=lambda _: "") is False
+
+    def no_tty(_):
+        raise EOFError
+    assert ae.confirm("cost $1", assume_yes=False, input_fn=no_tty) is False
+    assert ae.confirm("cost $1", assume_yes=True, input_fn=no_tty) is True
+
+
+def test_judge_parses_scores(tmp_path):
+    df = pd.DataFrame([{"run_index": 0, "decided_by": "llm", "claim_id": "PN-1", "label": 1,
+                        "decision": "FLAG_FOR_INVESTIGATION", "rationale": "High band.", "evidence": [],
+                        "tool_results": {"fraud_score": {"ok": True, "fraud_probability": 0.4}}}])
+    judge_llm = scripted(AIMessage(content='{"cites_evidence": 1, "consistent_with_score": 1, '
+                                           '"no_invented_facts": 0, "clear_for_adjuster": 1, "comment": "x"}'))
+    j = ae.judge_rationales(df, judge_llm, n=5)
+    assert j.loc[0, "no_invented_facts"] == 0 and j.loc[0, "cites_evidence"] == 1
