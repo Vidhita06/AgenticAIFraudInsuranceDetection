@@ -63,7 +63,14 @@ scripts/build_vector_index.py
 tests/                     test_validation, test_tools, test_guardrails, test_graph (+ fixtures/)
 ```
 
-Step D adds `evaluation/` and the agent-evaluation notebook.
+```
+evaluation/agent_eval.py   sampling, cost estimates, batch runs, metrics, LLM-as-judge, report
+evaluation/results/        JSONL runs (git-ignored), judge scores, manual-review sheets
+scripts/run_batch_triage.py   offline | estimate | pilot | final | all
+scripts/install_b200_outputs.py   install B200 artifacts, rebuild the index, run tests
+notebooks/03_agent_evaluation.ipynb   analysis notebook (never spends money)
+docs/architecture.png      graph diagram (docs/make_architecture_diagram.py)
+```
 
 ## Setup
 
@@ -178,6 +185,52 @@ How a claim flows through the graph:
 Without an API key the agent still runs and returns the rule-based decision.
 `pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and
 no network.
+
+## Agent evaluation (Step D)
+
+The live LLM evaluation is one command on a laptop with a `.env` file:
+
+```bash
+python scripts/run_batch_triage.py estimate   # cost estimates only, spends nothing
+python scripts/run_batch_triage.py all        # pilot -> final test run -> report
+```
+
+`all` runs in this order, asking before each spend:
+
+1. **Estimate:** it prints a cost estimate, computed from the real prompt and tool-output
+   sizes, and asks before spending anything.
+2. **Pilot:** it runs 5 validation claims, prints the measured tokens, cost and latency per
+   claim, and projects the cost of the final run.
+3. **Final run:** if you approve the projection, it runs the test set once:
+   - all 138 test frauds plus 138 matched legitimate claims;
+   - 20 claims run 3 times, to check run-to-run consistency;
+   - 40 LLM-as-judge rubric checks on the rationales.
+4. **Report:** it writes `docs/report/03_agent_evaluation.md`, plus
+   `evaluation/results/manual_review_*.csv` with 20 claims for hand review.
+
+Options and safeguards:
+
+- `--max-cost USD` aborts if the estimate is higher.
+- `--batch` uses the cheaper `BATCH_MODEL_NAME` (Haiku 4.5).
+- Without a terminal, spending requires `--yes`.
+- A marker file stops the test evaluation from being re-run silently.
+
+The static estimate on Sonnet 5.5 is about $0.08 per claim: about $0.40 for the pilot and
+about $25 for the full final run, including a 1.3x margin. The pilot replaces this with
+measured numbers.
+
+`python scripts/run_batch_triage.py offline` runs the rule-based path (no LLM, free) on
+validation claims. `notebooks/03_agent_evaluation.ipynb` analyses whichever results exist.
+
+**When the B200 outputs arrive**, run:
+
+```bash
+python scripts/install_b200_outputs.py b200_outputs_<timestamp>.zip
+```
+
+It installs `models/`, rebuilds `data/vector_store` and runs the tests. The index records the
+SHA-256 of `models/preprocessor.joblib`, `policy_rules.yaml` and the feature config. The
+similar-claims tool and the tests refuse a stale index.
 
 ## Data
 
