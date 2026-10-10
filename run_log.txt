@@ -1,0 +1,27 @@
+[07:33:13] data: augmented train 300,000 rows, real validation 2,313 rows (139 frauds); max_rows=None
+[07:33:14] baseline: all-legit              val PR-AUC 0.0601 [0.060, 0.060]  ROC-AUC 0.5000  (0s)
+[07:33:14] baseline: rules-only (red flags) val PR-AUC 0.1424 [0.123, 0.176]  ROC-AUC 0.7810  (0s)
+[07:33:41] logreg                           val PR-AUC 0.1933 [0.161, 0.253]  ROC-AUC 0.8146  (25s)
+[07:33:42] mix_xgboost_f0.0_w1.0_real_s42   val PR-AUC 0.2308 [0.190, 0.294]  ROC-AUC 0.8306  (1s)
+[07:33:44] mix_xgboost_f0.0_w1.0_real_s43   val PR-AUC 0.2448 [0.200, 0.314]  ROC-AUC 0.8374  (1s)
+[07:33:47] mix_xgboost_f0.1_w1.0_real_s42   val PR-AUC 0.2276 [0.193, 0.291]  ROC-AUC 0.8531  (2s)
+[07:33:49] mix_xgboost_f0.1_w1.0_real_s43   val PR-AUC 0.2464 [0.205, 0.316]  ROC-AUC 0.8523  (2s)
+[07:33:53] mix_xgboost_f0.25_w1.0_real_s42  val PR-AUC 0.2589 [0.214, 0.327]  ROC-AUC 0.8593  (3s)
+[07:33:56] mix_xgboost_f0.25_w1.0_real_s43  val PR-AUC 0.2587 [0.214, 0.327]  ROC-AUC 0.8539  (3s)
+[07:34:02] mix_xgboost_f0.5_w1.0_real_s42   val PR-AUC 0.2674 [0.219, 0.339]  ROC-AUC 0.8632  (5s)
+[07:34:08] mix_xgboost_f0.5_w1.0_real_s43   val PR-AUC 0.2724 [0.226, 0.340]  ROC-AUC 0.8677  (5s)
+[07:34:18] mix_xgboost_f1.0_w1.0_real_s42   val PR-AUC 0.2777 [0.229, 0.350]  ROC-AUC 0.8691  (9s)
+[07:34:26] mix_xgboost_f1.0_w1.0_real_s43   val PR-AUC 0.2707 [0.225, 0.341]  ROC-AUC 0.8683  (7s)
+[07:34:35] mix_xgboost_f1.0_w0.3_real_s42   val PR-AUC 0.2830 [0.234, 0.356]  ROC-AUC 0.8718  (8s)
+[07:34:43] mix_xgboost_f1.0_w0.3_real_s43   val PR-AUC 0.2883 [0.238, 0.360]  ROC-AUC 0.8731  (8s)
+[07:34:51] mix_xgboost_f1.0_w0.1_real_s42   val PR-AUC 0.2794 [0.229, 0.350]  ROC-AUC 0.8674  (7s)
+[07:35:00] mix_xgboost_f1.0_w0.1_real_s43   val PR-AUC 0.2880 [0.237, 0.364]  ROC-AUC 0.8696  (7s)
+[07:35:07] mix_xgboost_f1.0_w1.0_synonly_s42 val PR-AUC 0.2742 [0.226, 0.346]  ROC-AUC 0.8660  (7s)
+[07:35:16] mix_xgboost_f1.0_w1.0_synonly_s43 val PR-AUC 0.2764 [0.230, 0.347]  ROC-AUC 0.8681  (7s)
+[07:35:16] chosen data mix: {'synthetic_fraction': 1.0, 'synthetic_weight': 0.3}
+[07:35:48] rf                               val PR-AUC 0.2459 [0.203, 0.315]  ROC-AUC 0.8491  (32s)
+[07:35:57] xgboost                          val PR-AUC 0.2830 [0.234, 0.356]  ROC-AUC 0.8718  (8s)
+[07:36:03] !! lightgbm failed: ModuleNotFoundError: No module named 'lightgbm'
+[07:36:05] !! catboost failed: ModuleNotFoundError: No module named 'catboost'
+[07:36:11] !! mlp failed: RuntimeError: Numpy is not available
+[07:36:11] tuning xgboost: 80 trials
