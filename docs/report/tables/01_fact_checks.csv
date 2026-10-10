@@ -1,0 +1,29 @@
+check,expected,observed,ok
+raw shape,"(15420, 33)","(15420, 33)",True
+augmented rows (real train + synthetic),300000,300000,True
+real train rows / fraud,"(10793, 646)","(10793, 646)",True
+synthetic rows / fraud,"(289207, 17310)","(289207, 17310)",True
+validation rows / fraud,"(2313, 139)","(2313, 139)",True
+test rows / fraud,"(2313, 138)","(2313, 138)",True
+real splits disjoint by PolicyNumber (overlapping ids),0,0,True
+original rows in no real split,[1517],[1517],True
+"dropped row has DayOfWeekClaimed='0', MonthClaimed='0', Age=0",True,True,True
+real split rows identical to original rows (mismatching rows),0,0,True
+synthetic PolicyNumber min,15421,15421,True
+synthetic PolicyNumber sequential,True,True,True
+real PolicyNumber range within 1..15420,True,True,True
+synthetic exact copies of real_train rows (all cols but PolicyNumber),0,0,True
+synthetic exact copies of real_validation rows (all cols but PolicyNumber),0,0,True
+synthetic exact copies of real_test rows (all cols but PolicyNumber),0,0,True
+duplicate rows across all splits (all cols but PolicyNumber),0,0,True
+duplicate synthetic rows (all cols but PolicyNumber),0,0,True
+Age = 0 in real train,232,232,True
+Age = 0 in synthetic,5242,5242,True
+PolicyType mismatch share in real train,~32.00%,32.04%,True
+PolicyType mismatch share in synthetic,~32.00%,32.08%,True
+Year order 1994 > 1995 > 1996 in real_train,True,True,True
+Year order 1994 > 1995 > 1996 in synthetic,True,True,True
+Year order 1994 > 1995 > 1996 in real_validation,True,True,True
+Year order 1994 > 1995 > 1996 in real_test,True,True,True
+Deductible = 400 share in real train,~93.00%,96.29%,False
+Deductible = 400 share in synthetic,~93.00%,96.34%,False

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+
+# Generated
+data/vector_store/
+evaluation/results/*.jsonl
+outputs/
+b200_bundle.zip
+b200_outputs_*.zip
+*.log
+catboost_info/
+notebooks/_*.ipynb

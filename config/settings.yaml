@@ -1,0 +1,90 @@
+# Central settings: paths and parameters shared by EDA, training and the agent.
+random_state: 42
+
+paths:
+  raw: data/raw/fraud_oracle.csv
+  augmented_train: data/processed/augmented_train_300k.csv
+  real_train: data/processed/real_train.csv
+  real_validation: data/processed/real_validation.csv
+  real_test: data/processed/real_test.csv
+  policy_rules: config/policy_rules.yaml
+  prompts_dir: config/prompts
+  vector_store_dir: data/vector_store
+  models_dir: models
+  reports_dir: docs/report
+  figures_dir: docs/report/figures
+  tables_dir: docs/report/tables
+  evaluation_results_dir: evaluation/results
+
+data:
+  target: FraudFound_P
+  id_column: PolicyNumber
+  origin_column: is_synthetic
+  # Never model features: PolicyNumber perfectly separates real from synthetic rows.
+  never_features: [PolicyNumber, is_synthetic]
+  # Fully determined by other columns; kept for display only.
+  display_only: [AgeOfPolicyHolder, PolicyType]
+  # Under review until the Step A EDA.
+  review_features: [RepNumber]
+  real_policy_number_max: 15420
+  invalid_policy_number: 1517
+
+metrics:
+  bootstrap_iterations: 2000
+  ci_level: 0.95
+
+decision:
+  # Missed fraud : unnecessary investigation. Default first; others are reported.
+  cost_ratios: [10, 5, 20]
+  capacity_top_fraction: 0.10
+
+retrieval:
+  top_k: 5
+
+agent:
+  max_steps: 8
+
+# Model inputs (decided in the Step A EDA, docs/report/01_eda_report.md §5).
+# Excluded: PolicyNumber, is_synthetic (leakage); PolicyType, AgeOfPolicyHolder (display only);
+# RepNumber (no signal); Sex, MaritalStatus (fairness, no gain); raw Age (-> age_band,
+# age_missing); MonthClaimed, DayOfWeekClaimed, WeekOfMonthClaimed (-> lag/weekend features).
+features:
+  nominal: [Fault, BasePolicy, VehicleCategory, AgentType, AccidentArea, Make,
+            PoliceReportFiled, WitnessPresent]
+  cyclic: [Month, DayOfWeek]
+  ordinal: [VehiclePrice, Days_Policy_Accident, Days_Policy_Claim, PastNumberOfClaims,
+            AgeOfVehicle, NumberOfSuppliments, AddressChange_Claim, NumberOfCars, age_band]
+  numeric: [Deductible, DriverRating, Year, WeekOfMonth, claim_lag_weeks, claim_lag_months]
+  binary: [age_missing, early_policy_incident, price_extreme, policyholder_fault,
+           liability_only, accident_weekend, claim_weekend]
+  red_flags: true            # one indicator per red flag + weighted red-flag score
+  consistency_count: true    # number of failed consistency rules (V04-V12)
+  rare_category_min_frequency: 20
+  fairness_groups: [Sex, MaritalStatus, age_band]
+
+training:
+  synthetic_weights: [1.0, 0.3, 0.1]
+  synthetic_fractions: [0.0, 0.1, 0.25, 0.5, 1.0]
+  default_synthetic_weight: 0.3
+  fast_mode_rows: 20000
+
+# Claude API list prices (USD per million tokens), used for cost estimates and reports.
+# Thinking tokens are billed as output tokens.
+llm_pricing_usd_per_mtok:
+  claude-sonnet-5-5: {input: 2.0, output: 10.0}
+  claude-opus-5-5: {input: 4.0, output: 20.0}
+  claude-haiku-4-5: {input: 1.0, output: 5.0}
+  claude-haiku-4-5-20251001: {input: 1.0, output: 5.0}
+
+evaluation:
+  pilot_claims: 5             # validation claims for the measured-cost pilot
+  legit_per_fraud: 1          # final sample: all test frauds + this many legit per fraud
+  consistency_claims: 20      # re-run this many claims...
+  consistency_runs: 3         # ...this many times in total
+  judge_claims: 40            # LLM-as-judge rubric on this many rationales
+  manual_review_claims: 20    # exported for hand review
+  # Static estimate assumptions (replaced by measured values once a pilot has run)
+  est_output_tokens_agent_call: 900
+  est_output_tokens_synthesis: 1500
+  est_agent_calls_per_claim: 3
+  est_safety_margin: 1.3

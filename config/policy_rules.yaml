@@ -1,0 +1,494 @@
+# Claim policy rules used by the validation layer and the agent's policy-check tool.
+#
+# Each rule has:
+#   id         stable identifier (the Python check is registered under the same id)
+#   type       validation  -> src/validation/validators.py (missing or invalid fields)
+#              consistency -> src/validation/consistency_rules.py (timeline and logic checks)
+#              red_flag    -> fraud-risk indicators derived from the EDA (added in Step A)
+#   severity   blocking -> claim cannot be assessed: REQUEST_MORE_INFO
+#              warning  -> inconsistency or risk signal the adjuster should look at
+#              info     -> unusual but plausible context
+#   condition  plain-English statement of what PASSING means
+#   explanation  message shown when the rule FAILS; {Field} placeholders are filled from the
+#              claim, plus {missing_fields}, {invalid_values} and {expected_holder_bin}
+#   params     optional parameters read by the check
+version: 1
+
+rules:
+  - id: V01_REQUIRED_FIELDS
+    type: validation
+    severity: blocking
+    condition: All claim fields are present.
+    explanation: "Missing fields: {missing_fields}."
+
+  - id: V02_DOMAIN_VALUES
+    type: validation
+    severity: blocking
+    condition: Every field takes a known value.
+    explanation: "Values outside the known category sets: {invalid_values}."
+    params: {age_min: 16, age_max: 100}
+
+  - id: V03_AGE_MISSING
+    type: validation
+    severity: blocking
+    condition: Age is recorded (0 is the missing-age sentinel).
+    explanation: Age is 0 (missing-age sentinel); policyholder age must be obtained.
+    params: {missing_sentinel: 0}
+
+  - id: V04_AGE_HOLDER_BIN
+    type: consistency
+    severity: warning
+    condition: AgeOfPolicyHolder matches the band implied by Age in the reference data.
+    explanation: "Age {Age} implies AgeOfPolicyHolder '{expected_holder_bin}', got '{AgeOfPolicyHolder}'."
+
+  - id: V05_POLICYTYPE_CONSISTENT
+    type: consistency
+    severity: warning
+    condition: PolicyType equals VehicleCategory + ' - ' + BasePolicy (or the known alias).
+    explanation: >-
+      PolicyType '{PolicyType}' disagrees with VehicleCategory '{VehicleCategory}'
+      and BasePolicy '{BasePolicy}'.
+    params: &policytype_alias
+      alias: {PolicyType: Sedan - Liability, VehicleCategory: Sport, BasePolicy: Liability}
+
+  - id: V05B_POLICYTYPE_KNOWN_ALIAS
+    type: consistency
+    severity: info
+    condition: PolicyType is not the known 'Sedan - Liability' alias for a Sport/Liability claim.
+    explanation: >-
+      PolicyType 'Sedan - Liability' recorded for a Sport vehicle on a Liability policy:
+      a known labelling quirk of the source data, not a claim error.
+    params: *policytype_alias
+
+  - id: V06_CLAIM_AFTER_ACCIDENT
+    type: consistency
+    severity: warning
+    condition: Claim is not dated before the accident (same-month week check).
+    explanation: >-
+      Claimed in week {WeekOfMonthClaimed} of {MonthClaimed} but accident in week
+      {WeekOfMonth} of {Month}: claim precedes the accident, or was filed ~12 months later.
+
+  - id: V07_REPORTING_DELAY
+    type: consistency
+    severity: info
+    condition: Claim filed less than 6 months after the accident.
+    explanation: "Accident in {Month}, claim in {MonthClaimed}: reporting delay of 6+ months."
+    params: {min_months: 6}
+
+  - id: V08_EARLY_POLICY_INCIDENT
+    type: consistency
+    severity: warning
+    condition: Incident and claim are not at the very start of the coverage period.
+    explanation: >-
+      Days_Policy_Accident='{Days_Policy_Accident}', Days_Policy_Claim='{Days_Policy_Claim}':
+      incident at or before the start of the policy; check the coverage period.
+    params:
+      accident_bins: [none, 1 to 7]
+      claim_bins: [none]
+
+  - id: V09_POLICY_DAYS_ORDER
+    type: consistency
+    severity: warning
+    condition: Days_Policy_Claim is not shorter than Days_Policy_Accident.
+    explanation: >-
+      Days_Policy_Claim '{Days_Policy_Claim}' is shorter than
+      Days_Policy_Accident '{Days_Policy_Accident}'.
+
+  - id: V10_POLICY_DAYS_VS_LAG
+    type: consistency
+    severity: warning
+    condition: A claim filed within 30 days of policy start is not 2+ months after the accident.
+    explanation: >-
+      Claim filed '{Days_Policy_Claim}' days into the policy, yet {Month} -> {MonthClaimed}
+      implies a lag of 2+ months.
+    params:
+      claim_bins_within_30_days: [none, 8 to 15, 15 to 30]
+      min_months: 2
+
+  - id: V11_VEHICLE_VS_DRIVER_AGE
+    type: consistency
+    severity: info
+    condition: For holders under 21, the vehicle is not older than their driving years.
+    explanation: >-
+      Holder aged {Age} with a vehicle aged '{AgeOfVehicle}': older than the holder's
+      driving years (possible, e.g. used car).
+    params: {max_age: 20, min_driving_age: 16}
+
+  - id: V12_YOUNG_HOLDER_HISTORY
+    type: consistency
+    severity: info
+    condition: Holders under 21 do not report >4 past claims or 5+ cars.
+    explanation: >-
+      Holder aged {Age} with PastNumberOfClaims '{PastNumberOfClaims}' and
+      NumberOfCars '{NumberOfCars}'.
+    params:
+      max_age: 20
+      past_claims: [more than 4]
+      number_of_cars: [5 to 8, more than 8]
+
+# Red-flag rules (type: red_flag): fraud-risk indicators curated in the Step A EDA
+# (notebooks/01_eda.ipynb, docs/report/01_eda_report.md). A red flag fires when every
+# `when` column takes one of the listed values. Red flags never block a claim; they
+# inform the rationale. `stats` is regenerated by the notebook from real train,
+# synthetic and real validation (rate = fraud rate among matching claims, lift = rate /
+# base rate, recall = share of all frauds matched); never edit it by hand.
+# Ids are stable: RF06 (third party + address change 2-3 years) was retired because it
+# matched almost the same claims as RF04.
+red_flags:
+- id: RF01_PH_FAULT_ALL_PERILS
+  type: red_flag
+  severity: warning
+  when:
+    Fault:
+    - Policy Holder
+    BasePolicy:
+    - All Perils
+  condition: Policyholder at fault on an All Perils policy.
+  explanation: The policyholder is at fault and the claim is on an All Perils policy, the highest-risk
+    policy-fault combination.
+  stats:
+    real_train:
+      n: 1944
+      support_pct: 18.01
+      fraud_rate: 0.1574
+      lift: 2.63
+      recall: 0.4737
+    synthetic:
+      n: 52032
+      support_pct: 17.99
+      fraud_rate: 0.1571
+      lift: 2.62
+      recall: 0.4723
+    real_validation:
+      n: 445
+      support_pct: 19.24
+      fraud_rate: 0.1483
+      lift: 2.47
+      recall: 0.4748
+- id: RF02_PH_FAULT_COLLISION
+  type: red_flag
+  severity: info
+  when:
+    Fault:
+    - Policy Holder
+    BasePolicy:
+    - Collision
+  condition: Policyholder at fault on a Collision policy.
+  explanation: The policyholder is at fault on a Collision policy, an above-average-risk combination.
+  stats:
+    real_train:
+      n: 2906
+      support_pct: 26.92
+      fraud_rate: 0.0977
+      lift: 1.63
+      recall: 0.4396
+    synthetic:
+      n: 77652
+      support_pct: 26.85
+      fraud_rate: 0.0967
+      lift: 1.62
+      recall: 0.434
+    real_validation:
+      n: 625
+      support_pct: 27.02
+      fraud_rate: 0.1024
+      lift: 1.7
+      recall: 0.4604
+- id: RF03_DEDUCTIBLE_500
+  type: red_flag
+  severity: info
+  when:
+    Deductible:
+    - 500
+  condition: Deductible of 500 (most policies carry 400).
+  explanation: The policy carries a 500 deductible, which is uncommon and associated with a much higher
+    fraud rate.
+  stats:
+    real_train:
+      n: 187
+      support_pct: 1.73
+      fraud_rate: 0.2246
+      lift: 3.75
+      recall: 0.065
+    synthetic:
+      n: 4860
+      support_pct: 1.68
+      fraud_rate: 0.1852
+      lift: 3.09
+      recall: 0.052
+    real_validation:
+      n: 28
+      support_pct: 1.21
+      fraud_rate: 0.0714
+      lift: 1.19
+      recall: 0.0144
+- id: RF04_THIRD_PARTY_DEDUCTIBLE_500
+  type: red_flag
+  severity: warning
+  when:
+    Fault:
+    - Third Party
+    Deductible:
+    - 500
+  condition: Third party at fault, yet a 500 deductible.
+  explanation: Fault is attributed to a third party (normally low risk), but the policy has a 500 deductible.
+    In real training data this cluster (which almost always also has an address change 2 to 3 years before
+    the claim) holds nearly all third-party-fault frauds.
+  stats:
+    real_train:
+      n: 55
+      support_pct: 0.51
+      fraud_rate: 0.5455
+      lift: 9.11
+      recall: 0.0464
+    synthetic:
+      n: 1273
+      support_pct: 0.44
+      fraud_rate: 0.4446
+      lift: 7.43
+      recall: 0.0327
+    real_validation:
+      n: 7
+      support_pct: 0.3
+      fraud_rate: 0.2857
+      lift: 4.75
+      recall: 0.0144
+- id: RF05_ADDRESS_CHANGE_2_3Y
+  type: red_flag
+  severity: warning
+  when:
+    AddressChange_Claim:
+    - 2 to 3 years
+  condition: Address changed 2 to 3 years before the claim.
+  explanation: The policyholder's address changed 2 to 3 years before the claim, a pattern with a fraud
+    rate several times the base rate.
+  stats:
+    real_train:
+      n: 207
+      support_pct: 1.92
+      fraud_rate: 0.2126
+      lift: 3.55
+      recall: 0.0681
+    synthetic:
+      n: 5242
+      support_pct: 1.81
+      fraud_rate: 0.1776
+      lift: 2.97
+      recall: 0.0538
+    real_validation:
+      n: 33
+      support_pct: 1.43
+      fraud_rate: 0.1212
+      lift: 2.02
+      recall: 0.0288
+- id: RF07_EARLY_POLICY_INCIDENT
+  type: red_flag
+  severity: warning
+  when:
+    Days_Policy_Accident:
+    - none
+    - 1 to 7
+  condition: Accident within the first week of the policy (or before it started).
+  explanation: The accident happened at or within a week of the policy start date (validation rule V08);
+    early-policy claims carry an elevated fraud rate.
+  stats:
+    real_train:
+      n: 37
+      support_pct: 0.34
+      fraud_rate: 0.1892
+      lift: 3.16
+      recall: 0.0108
+    synthetic:
+      n: 899
+      support_pct: 0.31
+      fraud_rate: 0.0945
+      lift: 1.58
+      recall: 0.0049
+    real_validation:
+      n: 20
+      support_pct: 0.86
+      fraud_rate: 0.1
+      lift: 1.66
+      recall: 0.0144
+- id: RF08_MISSING_AGE_ALL_PERILS
+  type: red_flag
+  severity: warning
+  when:
+    Age:
+    - 0
+    BasePolicy:
+    - All Perils
+  condition: Age not recorded on an All Perils claim.
+  explanation: The policyholder's age is missing (rule V03) on an All Perils claim; missing-age claims
+    are riskier, especially on All Perils policies.
+  stats:
+    real_train:
+      n: 83
+      support_pct: 0.77
+      fraud_rate: 0.2289
+      lift: 3.82
+      recall: 0.0294
+    synthetic:
+      n: 1701
+      support_pct: 0.59
+      fraud_rate: 0.2346
+      lift: 3.92
+      recall: 0.0231
+    real_validation:
+      n: 13
+      support_pct: 0.56
+      fraud_rate: 0.3077
+      lift: 5.12
+      recall: 0.0288
+- id: RF09_YOUNG_HOLDER_AT_FAULT
+  type: red_flag
+  severity: info
+  when:
+    Age:
+    - 16
+    - 17
+    - 18
+    - 19
+    - 20
+    Fault:
+    - Policy Holder
+  condition: Policyholder aged 16-20 and at fault.
+  explanation: A policyholder aged 16-20 is at fault; this group has roughly three times the base fraud
+    rate.
+  stats:
+    real_train:
+      n: 61
+      support_pct: 0.57
+      fraud_rate: 0.1803
+      lift: 3.01
+      recall: 0.017
+    synthetic:
+      n: 1427
+      support_pct: 0.49
+      fraud_rate: 0.1703
+      lift: 2.85
+      recall: 0.014
+    real_validation:
+      n: 7
+      support_pct: 0.3
+      fraud_rate: 0.2857
+      lift: 4.75
+      recall: 0.0144
+- id: RF10_SPORT_COLLISION
+  type: red_flag
+  severity: info
+  when:
+    VehicleCategory:
+    - Sport
+    BasePolicy:
+    - Collision
+  condition: Sport vehicle on a Collision policy.
+  explanation: A sport vehicle insured for Collision (most sport vehicles carry Liability only); this
+    combination has an elevated fraud rate.
+  stats:
+    real_train:
+      n: 246
+      support_pct: 2.28
+      fraud_rate: 0.1098
+      lift: 1.83
+      recall: 0.0418
+    synthetic:
+      n: 6533
+      support_pct: 2.26
+      fraud_rate: 0.107
+      lift: 1.79
+      recall: 0.0404
+    real_validation:
+      n: 46
+      support_pct: 1.99
+      fraud_rate: 0.2391
+      lift: 3.98
+      recall: 0.0791
+- id: RF11_SEDAN_PRICE_EXTREME
+  type: red_flag
+  severity: info
+  when:
+    VehicleCategory:
+    - Sedan
+    VehiclePrice:
+    - less than 20000
+    - more than 69000
+  condition: Sedan priced below 20,000 or above 69,000.
+  explanation: The vehicle is a sedan at an extreme price point (below 20,000 or above 69,000), where
+    fraud rates are above average.
+  stats:
+    real_train:
+      n: 1340
+      support_pct: 12.42
+      fraud_rate: 0.1007
+      lift: 1.68
+      recall: 0.209
+    synthetic:
+      n: 35507
+      support_pct: 12.28
+      fraud_rate: 0.0958
+      lift: 1.6
+      recall: 0.1966
+    real_validation:
+      n: 284
+      support_pct: 12.28
+      fraud_rate: 0.1021
+      lift: 1.7
+      recall: 0.2086
+- id: RF12_UTILITY_ALL_PERILS
+  type: red_flag
+  severity: info
+  when:
+    VehicleCategory:
+    - Utility
+    BasePolicy:
+    - All Perils
+  condition: Utility vehicle on an All Perils policy.
+  explanation: A utility vehicle on an All Perils policy, the riskiest vehicle-policy combination.
+  stats:
+    real_train:
+      n: 243
+      support_pct: 2.25
+      fraud_rate: 0.1193
+      lift: 1.99
+      recall: 0.0449
+    synthetic:
+      n: 6422
+      support_pct: 2.22
+      fraud_rate: 0.1176
+      lift: 1.96
+      recall: 0.0436
+    real_validation:
+      n: 60
+      support_pct: 2.59
+      fraud_rate: 0.15
+      lift: 2.5
+      recall: 0.0647
+- id: RF13_MAKE_ACCURA
+  type: red_flag
+  severity: info
+  when:
+    Make:
+    - Accura
+  condition: Vehicle make is Accura.
+  explanation: Claims on Accura vehicles show about twice the base fraud rate in real training and validation
+    data.
+  stats:
+    real_train:
+      n: 325
+      support_pct: 3.01
+      fraud_rate: 0.1231
+      lift: 2.06
+      recall: 0.0619
+    synthetic:
+      n: 8694
+      support_pct: 3.01
+      fraud_rate: 0.0734
+      lift: 1.23
+      recall: 0.0369
+    real_validation:
+      n: 76
+      support_pct: 3.29
+      fraud_rate: 0.1053
+      lift: 1.75
+      recall: 0.0576

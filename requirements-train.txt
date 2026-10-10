@@ -1,0 +1,16 @@
+# B200 training extras. Installed by notebooks/02_model_training.ipynb with
+# `pip install -r requirements-train.txt`. torch is NOT listed: use the server's
+# preinstalled CUDA build (Blackwell sm_100 needs CUDA 12.8+); never reinstall it.
+# These pins must equal requirements.txt so the saved joblib artifacts load locally.
+scikit-learn==1.9.1
+xgboost==3.2.0
+catboost==1.2.10
+lightgbm==4.7.0
+shap==0.51.0
+optuna==5.0.0
+pandas==3.0.6
+scipy==1.17.1
+joblib==1.6.0
+PyYAML==6.0.1
+pydantic==2.13.4
+matplotlib==3.11.2

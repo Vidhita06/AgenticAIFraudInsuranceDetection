@@ -1,0 +1,6 @@
+pair,cramers_v,deterministic
+AgeOfPolicyHolder vs Age,0.8478574703168507,True
+PolicyType vs VehicleCategory+BasePolicy,1.0,False
+MonthClaimed vs Month,0.7467057007774018,False
+DayOfWeekClaimed vs DayOfWeek,0.1455519323853098,False
+Days_Policy_Claim vs Days_Policy_Accident,0.49432498131380925,False
