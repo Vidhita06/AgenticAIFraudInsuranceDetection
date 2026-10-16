@@ -229,3 +229,168 @@ def test_judge_parses_scores(tmp_path):
                                            '"no_invented_facts": 0, "clear_for_adjuster": 1, "comment": "x"}'))
     j = ae.judge_rationales(df, judge_llm, n=5)
     assert j.loc[0, "no_invented_facts"] == 0 and j.loc[0, "cites_evidence"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Ollama path, end to end against a local stand-in for the Ollama HTTP API.
+# This checks the wiring (tools sent, num_ctx, JSON mode, tool-call parsing, token counts),
+# not model quality: no model weights are involved.
+# ---------------------------------------------------------------------------
+import threading  # noqa: E402
+from http.server import BaseHTTPRequestHandler, HTTPServer  # noqa: E402
+
+
+class FakeOllama:
+    def __init__(self, replies, models=("qwen2.5:7b",)):
+        self.replies, self.requests, self.models = list(replies), [], list(models)
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                body = json.dumps({"models": [{"name": m} for m in outer.models]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                outer.requests.append(req)
+                msg = outer.replies.pop(0) if outer.replies else {"content": "{}"}
+                lines = [{"model": req["model"], "created_at": "2026-01-01T00:00:00Z",
+                          "message": {"role": "assistant", **msg}, "done": False},
+                         {"model": req["model"], "created_at": "2026-01-01T00:00:00Z",
+                          "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop",
+                          "prompt_eval_count": 1500, "eval_count": 100}]
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.end_headers()
+                for line in lines:
+                    self.wfile.write((json.dumps(line) + "\n").encode())
+
+        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def close(self):
+        self.server.shutdown()
+
+
+def ollama_runner(fake, band="high", p=0.4123):
+    from src.agent.llm import get_llm
+    import os
+    os.environ["OLLAMA_BASE_URL"] = fake.url
+    llm = get_llm(provider="ollama", model="qwen2.5:7b")
+    synth = get_llm(provider="ollama", model="qwen2.5:7b", json_mode=True)
+    deps = NodeDeps(llm=llm, synth_llm=synth, scorer=score_stub(band, p), similar=SIM, policy=POLICY)
+    return TriageRunner(deps=deps)
+
+
+def decision_json(decision, *evidence):
+    return {"content": json.dumps({"decision": decision, "rationale": "High score and a policyholder-fault red flag.",
+                                   "evidence": [{"source_tool": s, "fact": f} for s, f in evidence]})}
+
+
+def test_ollama_native_tool_calls_end_to_end(sample_claims):
+    fake = FakeOllama([
+        {"content": "", "tool_calls": [{"function": {"name": "find_similar_claims", "arguments": {"k": 3}}}]},
+        {"content": "Enough evidence."},
+        decision_json("FLAG_FOR_INVESTIGATION", ("similar_claims", "2 of 3 similar claims were fraud"),
+                      ("fraud_score", "Fraud probability 0.4123")),
+    ])
+    try:
+        tid, d, trace = ollama_runner(fake).run_claim(sample_claims[1])
+    finally:
+        fake.close()
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.decided_by == "llm" and len(d.evidence) == 2
+    agent_req, synth_req = fake.requests[0], fake.requests[-1]
+    assert {t["function"]["name"] for t in agent_req["tools"]} == {"find_similar_claims", "check_policy_rules"}
+    assert agent_req["options"]["num_ctx"] >= 16384 and agent_req["options"]["temperature"] == 0
+    assert synth_req.get("format") == "json" and not synth_req.get("tools")      # no tools offered
+    calls = [c["name"] for t in trace if t["node"] == "tools" for c in t["calls"]]
+    assert calls == ["find_similar_claims"]
+    auto = [t for t in trace if t["node"] == "max_steps_check"][0]["auto_tools"]
+    assert auto == ["check_policy_rules"]          # model never called it: safety net ran
+
+
+def test_ollama_tool_call_written_as_text_is_recovered(sample_claims):
+    fake = FakeOllama([
+        {"content": 'I will check the rules: {"name": "check_policy_rules", "arguments": {}}'},
+        {"content": "No more tools needed."},
+        decision_json("FLAG_FOR_INVESTIGATION", ("policy_check", "RF01_PH_FAULT_ALL_PERILS fired")),
+    ])
+    try:
+        tid, d, trace = ollama_runner(fake).run_claim(sample_claims[1])
+    finally:
+        fake.close()
+    agent_events = [t for t in trace if t["node"] == "agent"]
+    assert agent_events[0].get("tool_calls_from_text") is True
+    assert [c["name"] for t in trace if t["node"] == "tools" for c in t["calls"]] == ["check_policy_rules"]
+    assert d.decided_by == "llm" and d.evidence[0].source_tool == "policy_check"
+
+
+def test_ollama_malformed_json_retries_then_falls_back(sample_claims):
+    fake = FakeOllama([{"content": "Looks risky."}, {"content": "I recommend flagging it."},
+                       {"content": "```json\n{\"decision\": \"FLAG\"\n```"}])
+    try:
+        tid, d, trace = ollama_runner(fake).run_claim(sample_claims[1])
+    finally:
+        fake.close()
+    assert d.decided_by == "rule_fallback" and d.decision == "FLAG_FOR_INVESTIGATION"
+    assert len([t for t in trace if t["node"] == "synthesize"][0]["failed"]) == 2
+
+
+def test_ollama_lenient_json_is_accepted(sample_claims):
+    fake = FakeOllama([{"content": "ok"},
+                       {"content": '```json\n{"Decision": "approve", "reasoning": "Low score, no red flags of note.",'
+                                   ' "evidence": [{"source": "fraud_score_tool", "fact": "probability 0.0312"},],}\n```'}])
+    try:
+        tid, d, _ = ollama_runner(fake, band="low", p=0.0312).run_claim(sample_claims[0])
+    finally:
+        fake.close()
+    assert d.decision == "APPROVE" and d.decided_by == "llm" and d.evidence[0].source_tool == "fraud_score"
+
+
+def test_ollama_batch_is_free_and_counts_tokens(sample_claims, tmp_path):
+    fake = FakeOllama([{"content": "ok"}, decision_json("APPROVE", ("fraud_score", "probability 0.0312"))])
+    claims = pd.DataFrame([{**sample_claims[0], "FraudFound_P": 0}])
+    try:
+        recs = ae.run_batch(claims, ollama_runner(fake, band="low", p=0.0312), "validation", tmp_path / "r.jsonl",
+                            model_name="qwen2.5:7b", provider="ollama", progress=lambda m: None)
+    finally:
+        fake.close()
+    assert recs[0]["cost_usd"] == 0 and recs[0]["input_tokens"] == 3000 and recs[0]["provider"] == "ollama"
+    est = ae.estimate_cost(claims, "qwen2.5:7b", 10, 2, provider="ollama")
+    assert est.free and est.usd == 0 and "$0" in est.describe("qwen2.5:7b")
+    assert ae.confirm("free", assume_yes=False, input_fn=lambda _: "", free=True) is True
+
+
+def test_check_ollama_reports_missing_model():
+    from src.agent.llm import check_ollama
+    fake = FakeOllama([], models=("llama3.1:8b",))
+    try:
+        with pytest.raises(RuntimeError, match="ollama pull qwen2.5:7b"):
+            check_ollama("qwen2.5:7b", fake.url)
+        check_ollama("llama3.1:8b", fake.url)
+    finally:
+        fake.close()
+    with pytest.raises(RuntimeError, match="not reachable"):
+        check_ollama("qwen2.5:7b", "http://127.0.0.1:9")
+
+
+def test_openai_base_url_and_free_tier_pricing(monkeypatch):
+    from src.agent.llm import get_llm, llm_settings, needs_api_key
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    s = llm_settings()
+    assert s["base_url"] == "https://api.groq.com/openai/v1" and needs_api_key(s)
+    llm = get_llm(model="llama-3.3-70b-versatile")
+    assert str(llm.openai_api_base).startswith("https://api.groq.com")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
+    assert not needs_api_key(llm_settings())                # local OpenAI-compatible server
+    assert ae.pricing("llama-3.3-70b-versatile", "openai")["free"] is True
+    assert ae.pricing("claude-sonnet-5-5", "anthropic")["input"] == 2.0

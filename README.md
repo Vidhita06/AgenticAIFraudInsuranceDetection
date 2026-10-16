@@ -156,7 +156,7 @@ notebook.
 ## Triage agent (Step C)
 
 ```bash
-cp .env.example .env                      # set LLM_API_KEY (Anthropic by default)
+cp .env.example .env                      # Ollama by default (free); see .env.example
 python scripts/build_vector_index.py      # FAISS index over real training claims -> data/vector_store/
 ```
 
@@ -188,49 +188,121 @@ no network.
 
 ## Agent evaluation (Step D)
 
-The live LLM evaluation is one command on a laptop with a `.env` file:
+The live evaluation is one command, `scripts/run_batch_triage.py all`:
+
+1. **Pilot:** 5 validation claims. It prints the measured tokens, latency and cost per claim,
+   and how often the model fell back to the rule-based decision.
+2. **Projection:** it projects the time and cost of the final run.
+3. **Final run:** it runs the test set once per model:
+   - all 138 test frauds plus 138 legitimate claims, or `--sample-size N` frauds plus N legit;
+   - 20 claims run 3 times, to check run-to-run consistency;
+   - up to 40 LLM-as-judge rubric checks.
+4. **Report:** it writes `docs/report/03_agent_evaluation.md`, plus a per-model copy that
+   names the model and sample size. It also writes
+   `evaluation/results/manual_review_<model>_*.csv` with 20 claims for hand review.
+
+**Free models** (Ollama, free-tier APIs) show **$0**, need no API key and run without a
+confirmation prompt. **Paid models** (Anthropic) show a cost estimate and ask first; that's
+about $0.08 per claim, or about $25 for the full run on Sonnet 5.5.
+
+### Option A: Ollama on the B200 with `qwen2.5:72b` (recommended)
+
+In a terminal on the B200 server (in Jupyter: *File → New → Terminal*):
 
 ```bash
-python scripts/run_batch_triage.py estimate   # cost estimates only, spends nothing
-python scripts/run_batch_triage.py all        # pilot -> final test run -> report
+# 1. Ollama: install if `ollama --version` fails, start it, pull the model (~47 GB)
+curl -fsSL https://ollama.com/install.sh | sh
+nohup ollama serve > ollama.log 2>&1 &
+ollama pull qwen2.5:72b
+
+# 2. The repository, in its own virtualenv (keeps the server's torch/numpy untouched)
+git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
+cd AgenticAIFraudInsuranceDetection
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Configure, build the similar-claims index, check the tests
+cp .env.example .env
+sed -i 's/^MODEL_NAME=.*/MODEL_NAME=qwen2.5:72b/; s/^BATCH_MODEL_NAME=.*/BATCH_MODEL_NAME=qwen2.5:72b/' .env
+python scripts/build_vector_index.py
+pytest -q
+
+# 4. Run: estimate, then pilot -> full final run -> report
+python scripts/run_batch_triage.py estimate
+python scripts/run_batch_triage.py all
 ```
 
-`all` runs in this order, asking before each spend:
+I couldn't measure the 72B model's speed here. At typical single-stream speeds (tens of
+tokens per second) and 3–4 calls per claim, the full run (276 test claims plus consistency and
+judge calls) may take several hours. The pilot prints the measured seconds per claim and the
+projected total before the final run starts. If it's too long, add `--sample-size 70`.
 
-1. **Estimate:** it prints a cost estimate, computed from the real prompt and tool-output
-   sizes, and asks before spending anything.
-2. **Pilot:** it runs 5 validation claims, prints the measured tokens, cost and latency per
-   claim, and projects the cost of the final run.
-3. **Final run:** if you approve the projection, it runs the test set once:
-   - all 138 test frauds plus 138 matched legitimate claims;
-   - 20 claims run 3 times, to check run-to-run consistency;
-   - 40 LLM-as-judge rubric checks on the rationales.
-4. **Report:** it writes `docs/report/03_agent_evaluation.md`, plus
-   `evaluation/results/manual_review_*.csv` with 20 claims for hand review.
+**Bring the results back:**
 
-Options and safeguards:
+```bash
+git add docs/report/03_agent_evaluation*.md evaluation/results/*.csv evaluation/results/*.json evaluation/results/.test_evaluation_done_*
+git commit -m "Agent evaluation: qwen2.5:72b" && git push
+```
 
-- `--max-cost USD` aborts if the estimate is higher.
-- `--batch` uses the cheaper `BATCH_MODEL_NAME` (Haiku 4.5).
-- Without a terminal, spending requires `--yes`.
-- A marker file stops the test evaluation from being re-run silently.
+The raw `*.jsonl` runs are git-ignored; download them from the file browser if you want them.
 
-The static estimate on Sonnet 5.5 is about $0.08 per claim: about $0.40 for the pilot and
-about $25 for the full final run, including a 1.3x margin. The pilot replaces this with
-measured numbers.
+### Option B: Ollama on a laptop with `qwen2.5:7b`
 
-`python scripts/run_batch_triage.py offline` runs the rule-based path (no LLM, free) on
-validation claims. `notebooks/03_agent_evaluation.ipynb` analyses whichever results exist.
+1. Install Ollama from https://ollama.com/download (macOS or Windows installer; on Linux,
+   `curl -fsSL https://ollama.com/install.sh | sh`). The app starts the server; otherwise run
+   `ollama serve`.
+2. Run:
 
-**When the B200 outputs arrive**, run:
+   ```bash
+   ollama pull qwen2.5:7b                      # ~4.7 GB; needs 8+ GB RAM
+
+   git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
+   cd AgenticAIFraudInsuranceDetection
+   python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   cp .env.example .env                         # already set to ollama + qwen2.5:7b
+   python scripts/build_vector_index.py
+   pytest -q
+
+   python scripts/run_batch_triage.py estimate --sample-size 40
+   python scripts/run_batch_triage.py all --sample-size 40 --consistency-claims 10 --judge-claims 20
+   ```
+
+- **Time:** a 7B model on a laptop CPU takes tens of seconds per call, so use the smaller
+  sample (40 frauds + 40 legit). The pilot prints the measured time per claim and projects
+  the total; with a GPU or Apple Silicon it's much faster.
+- **Quality:** a 7B model calls tools less reliably and makes more JSON mistakes than a 72B
+  one. The graph recovers tool calls the model writes as text, and runs the policy check
+  automatically if the model skips it (logged as `auto_tools`). It retries malformed JSON
+  once and then uses the rule-based decision. The report shows the fallback rate, so you can
+  compare models.
+- **Re-runs:** the test set is evaluated once *per model*, so a later 72B run on the B200 is
+  allowed.
+
+### Option C: free OpenAI-compatible APIs
+
+Groq, OpenRouter `:free` models and Google Gemini have free tiers; see the blocks in
+`.env.example`. Use `--sample-size 40 --pause 2` to stay under their rate limits. If a model
+is billed, add its price to `llm_pricing_usd_per_mtok` in `config/settings.yaml`; models not
+listed there are assumed free.
+
+### Without any LLM
+
+`python scripts/run_batch_triage.py offline` runs the rule-based path on validation claims.
+`notebooks/03_agent_evaluation.ipynb` analyses whichever results exist and never spends money.
+
+### Updating the model
+
+When new B200 outputs arrive, run:
 
 ```bash
 python scripts/install_b200_outputs.py b200_outputs_<timestamp>.zip
 ```
 
-It installs `models/`, rebuilds `data/vector_store` and runs the tests. The index records the
-SHA-256 of `models/preprocessor.joblib`, `policy_rules.yaml` and the feature config. The
-similar-claims tool and the tests refuse a stale index.
+It installs `models/`, rebuilds `data/vector_store` and runs the tests. Artifacts uploaded
+directly to `models/` need `python scripts/build_vector_index.py` instead. The index records
+the SHA-256 of `models/preprocessor.joblib`, `policy_rules.yaml` and the feature config, and
+the similar-claims tool and the tests refuse a stale index.
 
 ## Data
 

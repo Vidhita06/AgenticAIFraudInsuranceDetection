@@ -53,8 +53,12 @@ class ModelExplainer:
             sv = m.get_feature_importance(Pool(X, cat_features=self.cat_features), type="ShapValues")
             return np.asarray(sv)[:, :-1]
         if self.kind in ("XGBClassifier", "LGBMClassifier", "RandomForestClassifier"):
+            import warnings
             ex = shap.TreeExplainer(m)
-            sv = ex.shap_values(np.asarray(X, dtype=float))
+            with warnings.catch_warnings():
+                # LightGBM binary output is a per-class list; handled below (class 1 = fraud).
+                warnings.filterwarnings("ignore", message=".*shap values output has changed to a list.*")
+                sv = ex.shap_values(np.asarray(X, dtype=float))
             if isinstance(sv, list):          # older shap: one array per class
                 sv = sv[1]
             sv = np.asarray(sv)

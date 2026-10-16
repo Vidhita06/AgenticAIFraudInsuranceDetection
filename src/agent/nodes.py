@@ -42,6 +42,91 @@ class NodeDeps:
     max_steps: int = field(default_factory=lambda: int(load_config()["agent"]["max_steps"]))
     orchestrator_prompt: str = field(default_factory=lambda: (PROMPTS / "orchestrator_system.md").read_text())
     synthesis_prompt: str = field(default_factory=lambda: (PROMPTS / "synthesis.md").read_text())
+    synth_llm: Any = None                            # optional JSON-mode model for synthesis
+    auto_policy_check: bool = field(
+        default_factory=lambda: bool(load_config()["agent"].get("auto_policy_check", True)))
+
+
+AGENT_TOOL_NAMES = ("find_similar_claims", "check_policy_rules")
+_SOURCE_ALIASES = {"fraud_score": "fraud_score", "score": "fraud_score", "score_claim": "fraud_score",
+                   "fraud_score_tool": "fraud_score", "model": "fraud_score",
+                   "similar_claims": "similar_claims", "find_similar_claims": "similar_claims",
+                   "similar_claims_tool": "similar_claims", "similar": "similar_claims",
+                   "policy_check": "policy_check", "check_policy_rules": "policy_check",
+                   "policy_check_tool": "policy_check", "policy_rules": "policy_check", "red_flags": "policy_check",
+                   "validation": "validation", "validate": "validation", "validator": "validation"}
+
+
+def _json_objects(text: str) -> list[Any]:
+    """Every top-level JSON object in `text` (code fences and trailing commas tolerated)."""
+    import re
+    text = re.sub(r"```(?:json)?", "", text)
+    out, depth, start, in_str, esc = [], 0, None, False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            esc = (not esc) and ch == "\\"
+            if ch == '"' and not esc:
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                chunk = text[start:i + 1]
+                for candidate in (chunk, re.sub(r",\s*([}\]])", r"\1", chunk)):
+                    try:
+                        out.append(json.loads(candidate))
+                        break
+                    except json.JSONDecodeError:
+                        continue
+    return out
+
+
+def parse_decision_json(text: str) -> DecisionDraft:
+    """Lenient parser for the synthesis answer: accepts fenced JSON, key aliases
+    (reasoning/explanation -> rationale, source -> source_tool) and drops individual invalid
+    evidence items instead of rejecting the whole answer."""
+    objs = [o for o in _json_objects(text) if isinstance(o, dict) and "decision" in {k.lower() for k in o}]
+    if not objs:
+        raise ValueError("no JSON object with a 'decision' field in the response")
+    o = {k.lower(): v for k, v in objs[0].items()}
+    rationale = o.get("rationale") or o.get("reasoning") or o.get("explanation") or ""
+    evidence = []
+    for ev in o.get("evidence") or []:
+        if isinstance(ev, dict):
+            e = {k.lower(): v for k, v in ev.items()}
+            src = _SOURCE_ALIASES.get(str(e.get("source_tool") or e.get("source") or e.get("tool") or "").lower())
+            fact = e.get("fact") or e.get("text") or e.get("detail")
+            if src and isinstance(fact, str) and 3 <= len(fact) <= 400:
+                evidence.append({"source_tool": src, "fact": fact})
+    return DecisionDraft.model_validate({"decision": str(o["decision"]), "rationale": str(rationale),
+                                         "evidence": evidence})
+
+
+def text_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Tool calls that a model wrote as JSON text instead of native tool calls
+    (common with small local models), e.g. {"name": "check_policy_rules", "arguments": {}}."""
+    calls = []
+    for o in _json_objects(text):
+        if not isinstance(o, dict):
+            continue
+        fn = o.get("function") if isinstance(o.get("function"), dict) else o
+        name = fn.get("name") or o.get("tool")
+        if name in AGENT_TOOL_NAMES:
+            args = fn.get("arguments", fn.get("parameters", fn.get("args", {}))) or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            calls.append({"name": name, "args": args if isinstance(args, dict) else {},
+                          "id": f"text_call_{len(calls)}", "type": "tool_call"})
+    return calls
 
 
 def make_nodes(deps: NodeDeps) -> dict[str, Callable]:
@@ -91,9 +176,16 @@ def make_nodes(deps: NodeDeps) -> dict[str, Callable]:
                     "llm_error": f"{type(e).__name__}: {e}",
                     "trace": _event("agent", error=f"{type(e).__name__}: {str(e)[:300]}")}
         steps = state.get("steps", 0) + 1
+        recovered = False
+        if not getattr(reply, "tool_calls", None):
+            parsed = text_tool_calls(message_text(reply))
+            if parsed:
+                reply = AIMessage(content=message_text(reply), tool_calls=parsed)
+                recovered = True
         calls = [{"name": c["name"], "args": c.get("args", {})} for c in (getattr(reply, "tool_calls", None) or [])]
         return {"messages": new + [reply], "steps": steps,
-                "trace": _event("agent", step=steps, tool_calls=calls, text=message_text(reply)[:500])}
+                "trace": _event("agent", step=steps, tool_calls=calls, text=message_text(reply)[:500],
+                                **({"tool_calls_from_text": True} if recovered else {}))}
 
     def route_after_agent(state) -> str:
         msgs = state.get("messages") or []
@@ -122,7 +214,18 @@ def make_nodes(deps: NodeDeps) -> dict[str, Callable]:
         msgs = state.get("messages") or []
         last = msgs[-1] if msgs else None
         hit = isinstance(last, AIMessage) and bool(last.tool_calls) and state.get("steps", 0) >= deps.max_steps
-        return {"max_steps_reached": hit, "trace": _event("max_steps_check", reached=hit)}
+        update: dict[str, Any] = {"max_steps_reached": hit}
+        tr = state.get("tool_results") or {}
+        auto = []
+        # Safety net for models that answer without calling tools: the policy check is cheap,
+        # local and deterministic, so run it before synthesis (logged as automatic, not as an
+        # agent tool call).
+        if (deps.llm is not None and deps.auto_policy_check and "policy_check" not in tr
+                and not (tr.get("validation") or {}).get("blocking")):
+            update["tool_results"] = {"policy_check": deps.policy(state["claim"])}
+            auto.append("check_policy_rules")
+        update["trace"] = _event("max_steps_check", reached=hit, auto_tools=auto)
+        return update
 
     def synthesize(state):
         if deps.llm is None:
@@ -135,13 +238,10 @@ def make_nodes(deps: NodeDeps) -> dict[str, Callable]:
         errors = []
         while failures < 2:
             try:
-                reply = deps.llm.invoke([HumanMessage(prompt + (f"\n\nYour previous answer was invalid: {errors[-1]}. "
-                                                                 "Return only the JSON object." if errors else ""))])
-                text = message_text(reply)
-                start, end = text.find("{"), text.rfind("}")
-                if start < 0 or end <= start:
-                    raise ValueError("no JSON object in the response")
-                draft = DecisionDraft.model_validate(json.loads(text[start:end + 1]))
+                model = deps.synth_llm or deps.llm
+                reply = model.invoke([HumanMessage(prompt + (f"\n\nYour previous answer was invalid: {errors[-1]}. "
+                                                              "Return only the JSON object." if errors else ""))])
+                draft = parse_decision_json(message_text(reply))
                 return {"draft": draft.model_dump(), "llm_failures": failures,
                         "trace": _event("synthesize", attempt=len(errors) + 1, decision=draft.decision)}
             except (ValidationError, ValueError, json.JSONDecodeError) as e:

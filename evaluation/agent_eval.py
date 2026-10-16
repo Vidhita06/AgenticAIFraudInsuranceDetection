@@ -28,6 +28,7 @@ from src.ml.evaluate import wilson_ci
 RESULTS_DIR = PROJECT_ROOT / "evaluation" / "results"
 TEST_MARKER = RESULTS_DIR / ".test_evaluation_done"
 CHARS_PER_TOKEN = 3.5
+PAUSE_BETWEEN_CLAIMS_S = 0.0     # set by --pause (free-tier API rate limits)
 
 
 # ---------------------------------------------------------------------------
@@ -43,10 +44,14 @@ def load_split(split: str) -> pd.DataFrame:
 
 
 def stratified_sample(df: pd.DataFrame, legit_per_fraud: float = 1.0, n: int | None = None,
-                      seed: int = 42) -> pd.DataFrame:
-    """All frauds + legit_per_fraud x as many legit claims; with `n`, a balanced sample of
-    n claims (half fraud, half legit) instead."""
+                      seed: int = 42, n_frauds: int | None = None) -> pd.DataFrame:
+    """All frauds (or `n_frauds` of them) + legit_per_fraud x as many legit claims; with `n`,
+    a balanced sample of n claims (half fraud, half legit) instead."""
     fraud, legit = df[df[TARGET] == 1], df[df[TARGET] == 0]
+    n_fraud_total = len(fraud)
+    if n_frauds is not None:
+        fraud = fraud.sample(min(n_frauds, len(fraud)), random_state=seed)
+        n = None
     if n is not None:
         nf = min(len(fraud), max(1, n // 2))
         f = fraud.sample(nf, random_state=seed)
@@ -55,8 +60,10 @@ def stratified_sample(df: pd.DataFrame, legit_per_fraud: float = 1.0, n: int | N
         f = fraud
         l = legit.sample(min(len(legit), int(round(legit_per_fraud * len(fraud)))), random_state=seed)
     out = pd.concat([f, l]).sample(frac=1, random_state=seed).reset_index(drop=True)
-    out.attrs["legit_weight"] = len(legit) / max(len(l), 1)     # for prevalence re-weighting
-    out.attrs["fraud_weight"] = len(fraud) / max(len(f), 1)
+    # Re-weighting to the true prevalence: legit rows count (legit sampling fraction)^-1
+    # relative to fraud rows' (fraud sampling fraction)^-1.
+    out.attrs["fraud_weight"] = n_fraud_total / max(len(f), 1)
+    out.attrs["legit_weight"] = (len(legit) / max(len(l), 1)) / out.attrs["fraud_weight"]
     return out
 
 
@@ -64,12 +71,26 @@ def stratified_sample(df: pd.DataFrame, legit_per_fraud: float = 1.0, n: int | N
 # Cost estimation
 # ---------------------------------------------------------------------------
 
-def pricing(model: str) -> dict[str, float]:
+def pricing(model: str, provider: str = "anthropic") -> dict[str, Any]:
+    """USD per million tokens. Local Ollama models are free. For OpenAI-compatible gateways
+    (Groq, OpenRouter, Gemini) a model missing from llm_pricing_usd_per_mtok is assumed to be
+    on a free tier; add it to settings.yaml if it is billed."""
+    if provider == "ollama":
+        return {"input": 0.0, "output": 0.0, "free": True, "note": "local Ollama model"}
     table = load_config()["llm_pricing_usd_per_mtok"]
     for k, v in table.items():
         if model == k or model.startswith(k):
-            return v
+            return {**v, "free": v["input"] == 0 and v["output"] == 0, "note": "list price"}
+    if provider == "openai":
+        return {"input": 0.0, "output": 0.0, "free": True,
+                "note": "price unknown, assumed free tier (add it to llm_pricing_usd_per_mtok if billed)"}
     raise KeyError(f"no price for model {model!r}; add it to llm_pricing_usd_per_mtok in settings.yaml")
+
+
+def test_marker(model: str) -> Path:
+    """The test set is evaluated once per agent model."""
+    slug = "".join(c if c.isalnum() or c in "-." else "_" for c in model)
+    return RESULTS_DIR / f".test_evaluation_done_{slug}"
 
 
 @dataclass
@@ -82,11 +103,20 @@ class CostEstimate:
     usd: float
     per_claim_usd: float
     basis: str
+    free: bool = False
+    price_note: str = ""
+    seconds_per_run: Optional[float] = None
 
     def describe(self, model: str) -> str:
+        cost = (f"$0 ({self.price_note})" if self.free else
+                f"~${self.usd:.2f} (~${self.per_claim_usd:.4f} per run)")
+        t = ""
+        if self.seconds_per_run:
+            hours = (self.n_runs + self.n_judge * 0.5) * self.seconds_per_run / 3600
+            t = f"; ~{hours:.1f} h at the measured {self.seconds_per_run:.0f} s per run"
         return (f"{self.n_runs} agent runs ({self.n_claims} claims) + {self.n_judge} judge calls on {model}: "
                 f"~{self.input_tokens / 1e6:.2f}M input + ~{self.output_tokens / 1e6:.2f}M output tokens "
-                f"= ~${self.usd:.2f} (~${self.per_claim_usd:.4f} per run; basis: {self.basis})")
+                f"= {cost}{t} (basis: {self.basis})")
 
 
 def _static_tokens_per_claim(claim: Mapping[str, Any]) -> tuple[float, float]:
@@ -114,10 +144,10 @@ def _static_tokens_per_claim(claim: Mapping[str, Any]) -> tuple[float, float]:
 
 def estimate_cost(sample: pd.DataFrame, model: str, n_runs: int, n_judge: int = 0,
                   measured: Optional[Mapping[str, float]] = None,
-                  probe: Optional[pd.DataFrame] = None) -> CostEstimate:
+                  probe: Optional[pd.DataFrame] = None, provider: str = "anthropic") -> CostEstimate:
     """Measured per-run tokens (from a pilot) when available, otherwise a static estimate
     from the actual prompt and tool-output sizes, with a safety margin."""
-    price = pricing(model)
+    price = pricing(model, provider)
     if measured:
         tin, tout, basis = measured["input_tokens"], measured["output_tokens"], "measured in pilot run"
     else:
@@ -133,11 +163,17 @@ def estimate_cost(sample: pd.DataFrame, model: str, n_runs: int, n_judge: int = 
     total_out = n_runs * tout + n_judge * judge_out
     usd = (total_in * price["input"] + total_out * price["output"]) / 1e6
     per = (tin * price["input"] + tout * price["output"]) / 1e6
-    return CostEstimate(len(sample), n_runs, n_judge, total_in, total_out, usd, per, basis)
+    return CostEstimate(len(sample), n_runs, n_judge, total_in, total_out, usd, per, basis,
+                        free=price["free"], price_note=price["note"],
+                        seconds_per_run=(measured or {}).get("latency_s"))
 
 
-def confirm(message: str, assume_yes: bool = False, input_fn: Callable[[str], str] = input) -> bool:
+def confirm(message: str, assume_yes: bool = False, input_fn: Callable[[str], str] = input,
+            free: bool = False) -> bool:
     print(message)
+    if free:
+        print("No spend (free model): running without confirmation.")
+        return True
     if assume_yes:
         print("--yes given: proceeding.")
         return True
@@ -181,13 +217,14 @@ def model_only_decision(tool_results: Mapping[str, Any]) -> str:
 
 
 def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_index: int = 0,
-              model_name: str = "none", progress: Callable[[str], None] = print) -> list[dict]:
+              model_name: str = "none", progress: Callable[[str], None] = print,
+              provider: str = "anthropic") -> list[dict]:
     """Triage every claim (stops at human review) and append one JSON record per claim."""
     tracker = UsageTracker()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     price = None
     try:
-        price = pricing(model_name)
+        price = pricing(model_name, provider)
     except KeyError:
         pass
     records = []
@@ -229,12 +266,14 @@ def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_inde
             "validation_issues": d.get("validation_issues", []),
             "latency_s": round(latency, 3), "llm_calls": tracker.calls,
             "input_tokens": tracker.input_tokens, "output_tokens": tracker.output_tokens,
-            "cost_usd": round(cost, 6), "model": model_name, "error": error,
+            "cost_usd": round(cost, 6), "model": model_name, "provider": provider, "error": error,
             "tool_results": tr,
         }
         with open(out_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, default=str) + "\n")
         records.append(rec)
+        if PAUSE_BETWEEN_CLAIMS_S:
+            time.sleep(PAUSE_BETWEEN_CLAIMS_S)
         if (i + 1) % 10 == 0 or i + 1 == len(claims):
             spent = sum(r["cost_usd"] for r in records)
             progress(f"  {i + 1}/{len(claims)} claims, ${spent:.3f} so far")

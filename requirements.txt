@@ -24,7 +24,8 @@ anthropic==1.11.0
 faiss-cpu==1.15.1
 pyarrow==25.0.1
 python-dotenv==1.2.2
-# Optional providers: pip install langchain-openai | langchain-ollama
+langchain-ollama==1.1.0
+langchain-openai==1.7.2
 # Running the notebooks headless (jupyter nbconvert --execute)
 ipykernel==7.4.0
 nbconvert==7.17.1
