@@ -144,11 +144,11 @@ xgboost, catboost, lightgbm and shap pins). If the MLP wins, CPU torch is also n
 python -c "from src.ml.predict import load_artifacts, score_claims; from src.ml.data import load_real_validation; print(score_claims(load_real_validation().head(3), load_artifacts()))"
 ```
 
-The `models/` files currently in the repo are **FAST_MODE placeholders**: a 20k-row CPU run
-with `"placeholder": true` in `model_card.json`. They exist so Step C can be built and tested;
-the B200 artifacts replace them. `docs/report/02_model_training_fast_mode_run.ipynb` is the
-executed FAST_MODE smoke test of the same notebook. In FAST_MODE the evaluation section uses
-real validation as a stand-in, so `real_test.csv` stays unopened until the B200 run.
+`models/` holds the **B200 artifacts** (`lightgbm-b200-20261016-0915`). They load on CPU with
+`requirements.txt`. After replacing them, rebuild the index (`python scripts/build_vector_index.py`)
+and regenerate the report assets (`python scripts/regenerate_model_report.py`).
+`docs/report/02_model_training_fast_mode_run.ipynb` is the executed FAST_MODE smoke test of the
+notebook.
 
 **Headless alternative** (no Jupyter): `python scripts/train_model.py --trials 80`, or
 `--fast` for a CPU smoke test.
@@ -259,6 +259,30 @@ Rules that hold throughout:
 - 13 validation and consistency rules are defined in `config/policy_rules.yaml`.
 - Missing age (Age = 0) is the only blocking rule that fires on this data.
 - Early-policy incidents carry about 3× the base fraud rate in real data.
+
+**EDA and synthetic data** (`docs/report/01_eda_report.md`):
+
+- The synthetic rows are indistinguishable from real ones: adversarial AUC 0.511.
+- There is no memorisation.
+- Adding them raises real-validation PR-AUC by about 0.05.
+
+**Fraud model** (`docs/report/02_model_report.md`, `docs/report/model_card.md`): LightGBM, 3
+seeds, Platt-calibrated, trained on real + synthetic data (w = 0.1). On the held-out real test
+set (evaluated once):
+
+| Metric | Value | 95% CI |
+|---|---|---|
+| ROC-AUC | 0.874 | |
+| PR-AUC (random = 0.06) | 0.252 | |
+| Recall at the 10:1 cost threshold | 0.79 | 0.72–0.86 |
+| Precision at the 10:1 cost threshold | 0.21 | 0.19–0.23 |
+| False-positive rate | 0.19 | |
+
+- The synopsis success criterion is met: precision and recall are both well above a random
+  flagger at the same flag rate.
+- The CPU-trained PyTorch MLP comparison is in progress (`02_model_report.md` §5).
+
+**Agent:** built and tested with a scripted model. The live LLM evaluation is pending (Step D).
 
 See [`docs/synopsis_requirements.md`](docs/synopsis_requirements.md) for the synopsis checklist,
 including the items marked deferred.
