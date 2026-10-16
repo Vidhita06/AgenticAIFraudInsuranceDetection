@@ -45,8 +45,8 @@ frozen artifacts with `scripts/regenerate_model_report.py` (`tables/02_*.csv`,
 - **The model beats the rules-only red-flag score on every ranking metric:** test PR-AUC 0.252
   vs 0.139, ROC-AUC 0.874 vs 0.793. At a matched flag rate it is also better on precision
   (0.208 vs 0.158) and recall (0.790 vs 0.659).
-- **The neural network (MLP) is being trained on CPU here (§5).** It is compared on real
-  validation only.
+- **The neural network (MLP), trained on CPU, does not beat LightGBM (§5).** Its tuned
+  3-seed ensemble scores 0.262 validation PR-AUC vs 0.291. It was not evaluated on test.
 
 ## 2. Setup
 
@@ -101,7 +101,7 @@ was not uploaded.
 | XGBoost (w = 0.3) | 0.283 | partial run |
 | Random Forest | 0.246 | partial run |
 | Logistic regression | 0.193 | partial run |
-| MLP (CPU, this PR) | see §5 | this PR |
+| MLP (CPU, this PR), tuned, 3 seeds | 0.261 / 0.261 / 0.263; ensemble 0.262 (defaults: 0.261) | this PR, §5 |
 | CatBoost | not available: not installed in the partial run; the final run's zoo table was not uploaded | — |
 
 On validation, LightGBM and XGBoost are within noise of each other: about 0.29 vs 0.28, with
@@ -135,7 +135,29 @@ The MLP was skipped on the B200 because of a torch/numpy mismatch. It was traine
 
 Only real validation was used. Results: `tables/02_mlp_vs_lightgbm.csv`.
 
-_In progress: the results are added when the CPU run finishes._
+**Result: LightGBM stays the final model. The MLP was not evaluated on the test set.**
+
+| Model (real validation, 3-seed ensemble) | Members' PR-AUC | Ensemble PR-AUC [95% CI] | ROC-AUC |
+|---|---|---|---|
+| **LightGBM** (final model) | 0.294 / 0.289 / 0.290 | **0.291** [0.238, 0.363] | 0.870 |
+| MLP, default architecture | 0.254 / 0.249 / 0.259 | 0.261 | — |
+| MLP, tuned | 0.261 / 0.261 / 0.263 | 0.262 [0.218, 0.327] | 0.867 |
+
+- **The gap:** a paired bootstrap of MLP minus LightGBM gives -0.029 PR-AUC
+  [-0.074, +0.012].
+  - The interval includes 0, so the gap is not statistically conclusive on 139 validation frauds.
+  - But every MLP member, tuned or not, scores below every LightGBM member, and there is no
+    reason to prefer the MLP: it is slower and harder to explain (no TreeSHAP).
+- **Tuning:** the tuned configuration has hidden layers [512, 256, 128], dropout
+  0.39, learning rate 6.0e-04, batch size 1024 and BCE loss.
+  Tuning raised the ensemble only from 0.261 to
+  0.262. The best single trial (0.268) did not hold up over
+  3 seeds.
+- **Caveat:** the budget was small (8 trials on a shared CPU). A larger search on the B200
+  could narrow the gap, but it is unlikely to close a 0.03 deficit that holds across all
+  seeds.
+- **Test set:** per the protocol, the MLP did not beat LightGBM on validation, so
+  `real_test.csv` was not used for it.
 
 ## 6. Final test evaluation (real test, evaluated once by the B200 run)
 

@@ -352,7 +352,8 @@ set (evaluated once):
 
 - The synopsis success criterion is met: precision and recall are both well above a random
   flagger at the same flag rate.
-- The CPU-trained PyTorch MLP comparison is in progress (`02_model_report.md` §5).
+- A CPU-trained PyTorch MLP scores 0.262 validation PR-AUC (tuned, 3 seeds) vs LightGBM's 0.291,
+  so LightGBM stays and the MLP was not run on test (`02_model_report.md` §5).
 
 **Agent:** built and tested with a scripted model. The live LLM evaluation is pending (Step D).
 
