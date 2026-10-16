@@ -597,6 +597,40 @@ def to_cpu_inference(model):
     return model
 
 
+def _members(model) -> list:
+    m = getattr(model, "base", model)
+    return list(m.models) if isinstance(m, SeedEnsemble) else [m]
+
+
+def effective_params(model) -> dict[str, Any]:
+    """Hyperparameters the fitted estimator actually used (first seed member; members
+    differ only in random_state), restricted to JSON-friendly values."""
+    est = _members(model)[0]
+    out = {}
+    for k, v in est.get_params(deep=False).items():
+        if isinstance(v, tuple):
+            v = list(v)
+        if v is None or isinstance(v, (bool, int, float, str)) or (isinstance(v, list) and len(v) <= 8):
+            out[k] = v
+    return out
+
+
+def best_iterations(model) -> list[Any]:
+    its = []
+    for m in _members(model):
+        for attr in ("best_iteration_", "best_iteration", "best_epoch_"):
+            v = getattr(m, attr, None)
+            if callable(v):
+                v = v()
+            if v is not None:
+                its.append(int(v))
+                break
+        else:
+            if hasattr(m, "get_best_iteration"):
+                its.append(int(m.get_best_iteration() or 0))
+    return its
+
+
 def save_checkpoint(fm: FittedModel, directory: Path, metrics: Mapping[str, Any]) -> Path:
     import joblib
     directory.mkdir(parents=True, exist_ok=True)
@@ -787,12 +821,23 @@ class TrainingRun:
                                    preprocessor=pre)
             choice["table"].to_csv(self.out / "tables" / f"tuning_{name}_top_trials.csv", index=False)
             study.trials_dataframe().to_csv(self.out / "tables" / f"tuning_{name}_trials.csv", index=False)
-            self.tuned[name] = {"params": choice["params"], "mean_pr_auc": float(choice["table"]["mean"].iloc[0]),
-                                "default_pr_auc": r["pr_auc"], "preprocessor": pre}
-            rows.append({"family": name, "default_pr_auc": r["pr_auc"],
+            # Compare like with like: default parameters averaged over the same seeds.
+            dev = self.device if name in GPU_MODELS else "cpu"
+            default_scores = [average_precision_score(data.y_val, fit_model(
+                name, data, {}, device=dev, seed=s, preprocessor=pre, fast=self.fast).val_scores)
+                for s in self.seeds]
+            default_mean = float(np.mean(default_scores))
+            tuned_mean = float(choice["table"]["mean"].iloc[0])
+            self.tuned[name] = {"params": choice["params"], "mean_pr_auc": tuned_mean,
+                                "default_pr_auc": default_mean, "preprocessor": pre}
+            rows.append({"family": name, "default_single_run_pr_auc": r["pr_auc"],
+                         "default_mean_pr_auc_over_seeds": default_mean,
                          "best_single_trial": float(study.best_value),
-                         "chosen_mean_pr_auc_over_seeds": self.tuned[name]["mean_pr_auc"],
-                         "chosen_sd": float(choice["table"]["sd"].iloc[0]), "trials": len(study.trials)})
+                         "chosen_mean_pr_auc_over_seeds": tuned_mean,
+                         "chosen_sd": float(choice["table"]["sd"].iloc[0]), "trials": len(study.trials),
+                         "tuned_params_adopted": tuned_mean >= default_mean,
+                         "chosen_params": json.dumps({k: (list(v) if isinstance(v, tuple) else v)
+                                                      for k, v in choice["params"].items()}, default=str)})
         t = pd.DataFrame(rows)
         t.to_csv(self.out / "tables" / "tuning_summary.csv", index=False)
         return t
@@ -801,10 +846,15 @@ class TrainingRun:
     def finalize(self) -> dict[str, Any]:
         from src.ml.evaluate import cost_threshold, capacity_threshold, threshold_metrics
         options = []
+        tuning_record = []
         for name, t in getattr(self, "tuned", {}).items():
             use_tuned = t["mean_pr_auc"] >= t["default_pr_auc"]
             options.append((t["mean_pr_auc"] if use_tuned else t["default_pr_auc"], name,
                             t["params"] if use_tuned else {}, t["preprocessor"]))
+            tuning_record.append({"family": name, "default_mean_pr_auc": t["default_pr_auc"],
+                                  "tuned_mean_pr_auc": t["mean_pr_auc"], "tuned_params_adopted": use_tuned,
+                                  "tuned_params": {k: (list(v) if isinstance(v, tuple) else v)
+                                                   for k, v in t["params"].items()}})
         if not options:   # no tuning ran: best family from the zoo
             best = [r for r in self.table().to_dict("records") if r["model"] in PREPROCESSOR_KIND][0]
             options = [(best["pr_auc"], best["model"], {}, None)]
@@ -835,6 +885,11 @@ class TrainingRun:
         if medium >= high:
             medium = high / 2
         self.final = {"family": name, "params": params, "preprocessor": pre, "model": model,
+                      "tuning": tuning_record,
+                      "params_source": ("Optuna (best mean real-validation PR-AUC over seeds)" if params else
+                                        "defaults (DEFAULT_PARAMS in src/ml/train.py): tuned parameters did not "
+                                        "beat the defaults' mean real-validation PR-AUC" if tuning_record else
+                                        "defaults (no tuning run)"),
                       "raw_val": raw_val, "oof_cal": oof, "calibration": {k: v for k, v in cal.items() if k not in ("sigmoid", "isotonic")}
                       | {m: {"brier": cal[m]["brier"], "pr_auc": cal[m]["pr_auc"]} for m in ("sigmoid", "isotonic")},
                       "thresholds": thresholds, "risk_bands": {"medium": float(medium), "high": float(high)},
@@ -901,7 +956,10 @@ class TrainingRun:
         sv = ex.shap_values(X)
         names = ex.feature_names
         labels = [describe_feature(n)[0].split(" = ")[0] for n in names]
-        imp = pd.DataFrame(np.abs(sv), columns=labels).T.groupby(level=0).sum().T.mean().sort_values(ascending=False)
+        # Sum signed SHAP over a feature's one-hot columns per claim, then take mean |.|:
+        # summing absolute values per column would inflate many-level fields (e.g. 12 months).
+        imp = (pd.DataFrame(sv, columns=labels).T.groupby(level=0).sum().T.abs().mean()
+               .sort_values(ascending=False))
         imp.to_csv(self.out / "tables" / "shap_global_importance.csv", header=["mean_abs_shap"])
         y, p = ev["y"][idx], ev["scores"][idx]
         thr = f["risk_bands"]["high"]
@@ -969,7 +1027,11 @@ class TrainingRun:
             "model_version": f"{f['family']}-{'fast' if self.fast else 'b200'}-{date}",
             "placeholder": bool(self.fast),
             "family": f["family"], "n_seed_members": len(self.seeds),
-            "params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in f["params"].items()},
+            "params": effective_params(model),
+            "params_overrides": {k: (list(v) if isinstance(v, tuple) else v) for k, v in f["params"].items()},
+            "params_source": f.get("params_source"),
+            "tuning": f.get("tuning", []),
+            "best_iterations": best_iterations(model),
             "preprocessor_kind": PREPROCESSOR_KIND[f["family"]],
             "features": feature_names(f["preprocessor"]),
             "excluded_features": ["PolicyNumber", "is_synthetic", "PolicyType", "AgeOfPolicyHolder",

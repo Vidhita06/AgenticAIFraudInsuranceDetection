@@ -3,7 +3,37 @@
   "placeholder": false,
   "family": "lightgbm",
   "n_seed_members": 3,
-  "params": {},
+  "params": {
+    "boosting_type": "gbdt",
+    "class_weight": null,
+    "colsample_bytree": 0.8,
+    "importance_type": "split",
+    "learning_rate": 0.03,
+    "max_depth": -1,
+    "min_child_samples": 50,
+    "min_child_weight": 0.001,
+    "min_split_gain": 0.0,
+    "n_estimators": 3000,
+    "n_jobs": -1,
+    "num_leaves": 31,
+    "objective": null,
+    "random_state": 42,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "subsample": 0.8,
+    "subsample_for_bin": 200000,
+    "subsample_freq": 1,
+    "scale_pos_weight": 15.707488430795118,
+    "verbose": -1
+  },
+  "params_overrides": {},
+  "params_source": "defaults (DEFAULT_PARAMS in src/ml/train.py). Recovered from the pickled estimators. Either the Optuna-tuned configuration did not beat the defaults (the pre-fix code compared the tuned mean over seeds with the defaults' single run), or the tuning section did not run; the B200 run's tables/tuning_summary.csv or run_log.txt shows which.",
+  "tuning": "not recorded by the B200 run's model card (card schema before 2026-10-16 fix); see outputs/tables/tuning_summary.csv and tuning_<family>_top_trials.csv from that run",
+  "best_iterations": [
+    488,
+    490,
+    381
+  ],
   "preprocessor_kind": "tree",
   "features": [
     "Fault_Policy Holder",
@@ -338,5 +368,12 @@
     ],
     "bf16_supported": true
   },
-  "fast_mode": false
+  "fast_mode": false,
+  "card_amendments": [
+    {
+      "date": "2026-10-16",
+      "by": "PR #2",
+      "change": "added params (effective, read from the pickled estimators), params_overrides, params_source, tuning, best_iterations; no model file changed"
+    }
+  ]
 }

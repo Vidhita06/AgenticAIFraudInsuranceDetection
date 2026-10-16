@@ -1,0 +1,31 @@
+case,row,score,feature,value,shap_contribution,reason
+true_positive,1491,0.6843599927077839,red-flag score,5.0,2.69,red-flag score = 5.0 raises the fraud score
+true_positive,1491,0.6843599927077839,red flag RF04,1.0,1.6444,red flag RF04 triggered; this raises the fraud score
+true_positive,1491,0.6843599927077839,fault,Third Party,-0.5096,fault = Third Party lowers the fraud score
+true_positive,1491,0.6843599927077839,red flag RF03,1.0,0.3535,red flag RF03 triggered; this raises the fraud score
+true_positive,1491,0.6843599927077839,red flag RF02,0.0,-0.1493,red flag RF02 not triggered; this lowers the fraud score
+true_positive,299,0.6276842051944833,red-flag score,6.0,2.6616,red-flag score = 6.0 raises the fraud score
+true_positive,299,0.6276842051944833,red flag RF04,1.0,1.5953,red flag RF04 triggered; this raises the fraud score
+true_positive,299,0.6276842051944833,fault,Third Party,-0.5144,fault = Third Party lowers the fraud score
+true_positive,299,0.6276842051944833,red flag RF03,1.0,0.3457,red flag RF03 triggered; this raises the fraud score
+true_positive,299,0.6276842051944833,red flag RF02,0.0,-0.1496,red flag RF02 not triggered; this lowers the fraud score
+false_positive,2000,0.685885269955388,red-flag score,7.0,2.6034,red-flag score = 7.0 raises the fraud score
+false_positive,2000,0.685885269955388,red flag RF04,1.0,1.5793,red flag RF04 triggered; this raises the fraud score
+false_positive,2000,0.685885269955388,fault,Third Party,-0.557,fault = Third Party lowers the fraud score
+false_positive,2000,0.685885269955388,red flag RF03,1.0,0.3502,red flag RF03 triggered; this raises the fraud score
+false_positive,2000,0.685885269955388,red flag RF02,0.0,-0.1536,red flag RF02 not triggered; this lowers the fraud score
+false_positive,598,0.578243885403113,red-flag score,5.0,2.1538,red-flag score = 5.0 raises the fraud score
+false_positive,598,0.578243885403113,policyholder age band,0.0,0.3111,policyholder age band = 0.0 raises the fraud score
+false_positive,598,0.578243885403113,fault,Policy Holder,0.2891,fault = Policy Holder raises the fraud score
+false_positive,598,0.578243885403113,accident year,1994,0.2803,accident year = 1994 raises the fraud score
+false_positive,598,0.578243885403113,accident month,Feb,0.1818,accident month = Feb raises the fraud score
+false_negative,942,0.0025477446801236508,red-flag score,0.0,-0.7669,red-flag score = 0.0 lowers the fraud score
+false_negative,942,0.0025477446801236508,fault,Policy Holder,0.5399,fault = Policy Holder raises the fraud score
+false_negative,942,0.0025477446801236508,base policy,Liability,-0.4193,base policy = Liability lowers the fraud score
+false_negative,942,0.0025477446801236508,accident year,1995,0.2533,accident year = 1995 raises the fraud score
+false_negative,942,0.0025477446801236508,vehicle category,Sport,-0.1873,vehicle category = Sport lowers the fraud score
+false_negative,1720,0.0040041354612951035,red-flag score,0.0,-0.788,red-flag score = 0.0 lowers the fraud score
+false_negative,1720,0.0040041354612951035,fault,Policy Holder,0.5494,fault = Policy Holder raises the fraud score
+false_negative,1720,0.0040041354612951035,base policy,Liability,-0.415,base policy = Liability lowers the fraud score
+false_negative,1720,0.0040041354612951035,accident month,Apr,0.3071,accident month = Apr raises the fraud score
+false_negative,1720,0.0040041354612951035,vehicle category,Sport,-0.1928,vehicle category = Sport lowers the fraud score
