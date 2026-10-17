@@ -15,7 +15,7 @@ DONE = ("completed", "partial", "unavailable")
 REASON_CODES = (
     "BLOCKING_VALIDATION", "CLAIM_RECORD_CONTRADICTION", "HIGH_MODEL_RISK", "MEDIUM_MODEL_RISK", "LOW_MODEL_RISK",
     "MODEL_SCORE_UNAVAILABLE", "RED_FLAGS_PRESENT", "POLICY_CONDITION_FAILED", "POLICY_TERMS_UNVERIFIED",
-    "SIMILAR_CLAIMS_ELEVATED_FRAUD", "SIMILAR_CLAIMS_NO_FRAUD", "CLAIM_HISTORY_UNAVAILABLE", "CONFLICTING_EVIDENCE",
+    "SIMILAR_CLAIMS_ELEVATED_FRAUD", "SIMILAR_CLAIMS_NO_FRAUD", "STRONG_SHAP_DRIVER", "CLAIM_HISTORY_UNAVAILABLE", "CONFLICTING_EVIDENCE",
     "TOOL_FAILURE", "INCOMPLETE_INVESTIGATION", "SIMULATED_DATA_USED", "NO_MATERIAL_CONCERNS",
 )
 CLAIM_RECORD_CHECKS = ("PV02_POLICY_TYPE_CONSISTENT", "PV04_CLAIM_TIMELINE")
@@ -47,12 +47,45 @@ def uses_simulated(output: Mapping[str, Any] | None) -> bool:
     return bool(output) and output.get("ok", False) and output.get("source") == SIMULATED
 
 
-def fraud_evidence(tool_results: Mapping[str, Any]) -> bool:
-    fs, sim = tool_results.get("fraud_score") or {}, tool_results.get("similar_claims") or {}
-    if fs.get("ok") and (fs.get("risk_band") in ("high", "medium") or _warning_indicators(fs)):
-        return True
+def _agent_setting(key: str, default: Any) -> Any:
+    from src.config import load_config
+    return (load_config().get("agent") or {}).get(key, default)
+
+
+def concrete_factor_codes() -> frozenset[str]:
+    """Reason codes that count as a concrete, claim-specific factor for a medium-band fraud flag."""
+    return frozenset(_agent_setting("medium_band_concrete_factors", [
+        "RED_FLAGS_PRESENT", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD",
+        "STRONG_SHAP_DRIVER", "CONFLICTING_EVIDENCE"]))
+
+
+def strong_shap_drivers(shap: Mapping[str, Any] | None, threshold: Optional[float] = None) -> list[str]:
+    """Features other than the red flags whose SHAP contribution is at least `threshold`
+    log-odds. The red-flag score drives every medium/high score, so it is not counted here
+    (warning-level red flags have their own code)."""
+    shap = shap or {}
+    if not shap.get("ok"):
+        return []
+    t = float(_agent_setting("strong_shap_log_odds", 0.5) if threshold is None else threshold)
+    return [f["feature"] for f in shap.get("top_factors", [])
+            if (f.get("shap_value") or 0) >= t and not str(f["feature"]).startswith(("red flag", "red-flag"))]
+
+
+def similar_fraud_elevated(sim: Mapping[str, Any] | None) -> bool:
+    sim = sim or {}
     return bool(sim.get("ok") and sim.get("neighbour_frauds", 0) >= 2
                 and (sim.get("neighbour_fraud_rate") or 0) >= 2 * (sim.get("historical_base_rate") or 1))
+
+
+def fraud_evidence(tool_results: Mapping[str, Any]) -> bool:
+    """A fraud-risk signal beyond the score band: high band, a warning-level red flag, fraud
+    among the similar claims, or a strong (non-red-flag) SHAP driver. A medium band alone is
+    not one: on real validation its fraud rate is 8.8%, about 1.5x the 6% base rate."""
+    fs = tool_results.get("fraud_score") or {}
+    if fs.get("ok") and (fs.get("risk_band") == "high" or _warning_indicators(fs)):
+        return True
+    return similar_fraud_elevated(tool_results.get("similar_claims")) or \
+        (fs.get("risk_band") == "medium" and bool(strong_shap_drivers(tool_results.get("shap_explanation"))))
 
 
 def failed_required(tool_results: Mapping[str, Any], required: Iterable[str]) -> list[str]:
@@ -226,11 +259,14 @@ def reason_codes(decision: str, record: Mapping[str, Any], tool_results: Mapping
     if pv.get("ok") and pv.get("unknown_checks"):
         codes.append("POLICY_TERMS_UNVERIFIED")
     if sim.get("ok") and sim.get("k"):
-        rate, base = sim.get("neighbour_fraud_rate") or 0.0, sim.get("historical_base_rate") or 0.0
-        if sim.get("neighbour_frauds", 0) >= 2 and rate >= 2 * base:
+        if similar_fraud_elevated(sim):
             codes.append("SIMILAR_CLAIMS_ELEVATED_FRAUD")
         elif sim.get("neighbour_frauds", 0) == 0:
             codes.append("SIMILAR_CLAIMS_NO_FRAUD")
+    # Only above the low band: in a low-band claim one strong driver is outweighed by the rest
+    # (e.g. PN-5736: fault = Policy Holder +0.54 log-odds, probability 0.0086).
+    if fs.get("ok") and fs.get("risk_band") != "low" and strong_shap_drivers(tr.get("shap_explanation")):
+        codes.append("STRONG_SHAP_DRIVER")
     if ch.get("ok") and ch.get("status") == "unavailable":
         codes.append("CLAIM_HISTORY_UNAVAILABLE")
     if record.get("conflicts"):
@@ -242,7 +278,8 @@ def reason_codes(decision: str, record: Mapping[str, Any], tool_results: Mapping
     if record.get("simulated_data_used"):
         codes.append("SIMULATED_DATA_USED")
     concerns = {"BLOCKING_VALIDATION", "HIGH_MODEL_RISK", "MEDIUM_MODEL_RISK", "RED_FLAGS_PRESENT",
-                "CLAIM_RECORD_CONTRADICTION", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD", "CONFLICTING_EVIDENCE", "TOOL_FAILURE",
+                "CLAIM_RECORD_CONTRADICTION", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD",
+                "STRONG_SHAP_DRIVER", "CONFLICTING_EVIDENCE", "TOOL_FAILURE",
                 "INCOMPLETE_INVESTIGATION", "MODEL_SCORE_UNAVAILABLE"}
     if decision == "APPROVE" and not concerns & set(codes):
         codes.append("NO_MATERIAL_CONCERNS")

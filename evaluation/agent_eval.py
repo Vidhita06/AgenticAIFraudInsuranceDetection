@@ -441,6 +441,10 @@ def process_metrics(df: pd.DataFrame) -> dict[str, Any]:
         "claims_with_conflicts": int(d["conflicting_evidence"].apply(len).gt(0).sum()) if "conflicting_evidence" in d else 0,
         "flag_categories": {k: int(v) for k, v in d.loc[d.decision == "FLAG_FOR_INVESTIGATION", "flag_category"]
                             .value_counts().items()} if "flag_category" in d else {},
+        # FRAUD_RISK flags per risk band: "frauds/flags" (does the agent's medium-band judgement add value?)
+        "fraud_risk_flags_by_band": {b: f"{int(g.label.sum())}/{len(g)}" for b, g in
+                                     d[(d.decision == "FLAG_FOR_INVESTIGATION") & (d.flag_category == "FRAUD_RISK")]
+                                     .groupby("risk_band")} if {"flag_category", "risk_band"} <= set(d.columns) else {},
         "mean_tool_calls": float(d.tools_called.apply(len).mean()),
         "mean_agent_steps": float(d.agent_steps.mean()),
         "max_steps_hits": int(d.max_steps_reached.sum()),

@@ -16,7 +16,10 @@
 4c. A FRAUD_RISK flag needs a risk signal. If every reason code is a low-risk or systemic one
    (LOW_RISK_REASON_CODES: low band, unverifiable policy terms, unavailable history, no fraud
    among similar claims, simulated data), the flag rests only on known data-source gaps and
-   is replaced by the rule-based decision (`unsupported_fraud_flag`).
+   is replaced by the rule-based decision (`unsupported_fraud_flag`). In the medium band a
+   FRAUD_RISK flag needs at least one concrete factor (`agent.medium_band_concrete_factors`:
+   warning red flag, policy-condition FAIL, fraud among similar claims, strong SHAP driver,
+   conflicting evidence); a medium band alone is not enough.
 5. Every evidence fact must be traceable to the output of the tool it cites; untraceable
    facts are removed and logged. A tool that reported `unavailable` can only be cited for
    that limitation (so missing history is never presented as a clean history).
@@ -33,8 +36,8 @@ import json
 import re
 from typing import Any, Mapping
 
-from src.agent.evidence import (SIMULATED, aggregate_evidence, claim_level_grounds, failed_required, flag_category,
-                                pv_failures, reason_codes, uses_simulated)
+from src.agent.evidence import (SIMULATED, aggregate_evidence, claim_level_grounds, concrete_factor_codes,
+                                failed_required, flag_category, pv_failures, reason_codes, uses_simulated)
 from src.schemas.decision import ALLOWED_DECISIONS, DecisionDraft, Evidence, TriageDecision, normalize_decision
 
 # Reason codes that are no risk signal on their own: a low score, or gaps of the data source that
@@ -247,11 +250,15 @@ def apply_guardrails(draft: DecisionDraft | None, claim_id: str, tool_results: M
         category = flag_category(tool_results, required)
     if decision == "FLAG_FOR_INVESTIGATION" and category == "FRAUD_RISK":
         codes = set(reason_codes(decision, record, tool_results))
+        why = None
         if codes <= LOW_RISK_REASON_CODES:
+            why = "reason codes only " + ", ".join(sorted(codes))
+        elif s.get("risk_band") == "medium" and not codes & concrete_factor_codes():
+            why = "medium band without a concrete factor; reason codes " + ", ".join(sorted(codes))
+        if why:
             fb = rule_based_decision(claim_id, tool_results, "fraud flag without a risk signal", required)
             interventions.append({"guardrail": "unsupported_fraud_flag",
-                                  "detail": f"FLAG_FOR_INVESTIGATION -> {fb.decision} (reason codes only "
-                                            f"{', '.join(sorted(codes))})"})
+                                  "detail": f"FLAG_FOR_INVESTIGATION -> {fb.decision} ({why})"})
             decision, category = fb.decision, fb.flag_category
     if decision != "FLAG_FOR_INVESTIGATION":
         category = None

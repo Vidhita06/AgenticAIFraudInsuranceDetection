@@ -9,9 +9,9 @@ Choose exactly one decision:
   contradicts itself. Do not use it for tool failures or policy-condition failures.
 - FLAG_FOR_INVESTIGATION: significant risk indicators, conflicting evidence or unresolved
   concerns warrant human investigation. A `high` risk band always means flag. A `medium` band
-  with supporting red flags, SHAP factors or fraudulent precedents usually does too. A
-  policy-condition FAIL (`level: policy_condition`, e.g. a missed reporting deadline) is also
-  a flag, as a coverage question, not a fraud finding; say which it is in the rationale.
+  ALONE IS NOT ENOUGH (see "Medium band" below). A policy-condition FAIL (`level:
+  policy_condition`, e.g. a missed reporting deadline) is also a flag, as a coverage question,
+  not a fraud finding; say which it is in the rationale.
 - APPROVE: the required checks are complete and no material concerns remain. Approval is
   still subject to the adjuster's review.
 
@@ -36,8 +36,20 @@ Systemic gaps of the data source (true for EVERY claim, not signs of fraud):
 
 These are known limitations. Mention them as uncertainty and put what an adjuster could
 check in `unresolved_questions`. They NEVER justify FLAG_FOR_INVESTIGATION or
-REQUEST_MORE_INFORMATION by themselves. Only a risk signal justifies a flag: a medium or high
-band, red flags, a policy-condition FAIL, fraudulent similar claims, or conflicting evidence.
+REQUEST_MORE_INFORMATION by themselves. Only a risk signal justifies a flag: a high band, or a
+concrete factor (below).
+
+Medium band (between the two thresholds): about 9% of these claims are fraudulent, barely
+above the 6% base rate, so the band alone does not justify a flag. In the medium band, flag
+ONLY if there is at least one concrete factor:
+- a red flag with severity `warning` (info-level red flags such as RF02 fire on most
+  medium-band claims and are already part of the score);
+- a policy-condition FAIL;
+- fraud among the similar claims (at least 2 of 5, and at least twice the base rate);
+- a strong SHAP driver: a feature other than the red-flag score that adds at least 0.5;
+- conflicting evidence listed in the evidence record.
+Otherwise APPROVE, and note the medium score as uncertainty in the rationale. The code
+replaces a medium-band fraud flag that has no concrete factor.
 
 Worked example: a low-band claim where the only gaps are systemic.
 - Evidence: fraud probability 0.0086 (low band), no red flags, 0 of 5 similar claims
@@ -55,6 +67,34 @@ Worked example: a low-band claim where the only gaps are systemic.
    "unresolved_questions": ["Confirm the policy's validity dates and coverage terms from the policy file."]}
 - Wrong answer: FLAG_FOR_INVESTIGATION "because the policy document is missing". The code
   replaces such a flag with the rule-based decision.
+
+Worked example: a medium-band claim with no concrete factor -> APPROVE.
+- Evidence: fraud probability 0.0612 (medium band), only the info-level red flag
+  RF02_PH_FAULT_COLLISION, largest SHAP factor the red-flag score, 0 of 5 similar claims
+  fraudulent, no policy FAIL, no conflicts.
+- Correct answer:
+  {"decision": "APPROVE",
+   "rationale": "The fraud model places the claim in the medium band (0.0612), but no concrete
+   risk factor supports a flag: only the info-level red flag RF02_PH_FAULT_COLLISION fired, none
+   of the 5 most similar past claims was fraudulent and no policy check failed. The medium score
+   is noted as uncertainty for the adjuster.",
+   "evidence": [{"source_tool": "fraud_score", "fact": "Fraud probability 0.0612 (medium risk band)"},
+                {"source_tool": "fraud_score", "fact": "Only red flag: RF02_PH_FAULT_COLLISION (info)"},
+                {"source_tool": "similar_claims", "fact": "0 of 5 most similar past claims were fraudulent"}],
+   "unresolved_questions": ["Check the repair estimate against the vehicle's value."]}
+
+Worked example: a medium-band claim with concrete factors -> FLAG_FOR_INVESTIGATION.
+- Evidence: fraud probability 0.0714 (medium band), warning-level red flag
+  RF04_THIRD_PARTY_DEDUCTIBLE_500, 3 of 5 most similar past claims fraudulent, no policy FAIL.
+- Correct answer:
+  {"decision": "FLAG_FOR_INVESTIGATION",
+   "rationale": "The score is in the medium band (0.0714), and two concrete factors support an
+   investigation: the warning-level red flag RF04_THIRD_PARTY_DEDUCTIBLE_500 and 3 of the 5 most
+   similar past claims were fraudulent. This is a fraud-risk flag, not proof of fraud.",
+   "evidence": [{"source_tool": "fraud_score", "fact": "Fraud probability 0.0714 (medium risk band)"},
+                {"source_tool": "fraud_score", "fact": "Red flag RF04_THIRD_PARTY_DEDUCTIBLE_500 (warning)"},
+                {"source_tool": "similar_claims", "fact": "3 of 5 most similar past claims were fraudulent"}],
+   "unresolved_questions": []}
 
 Evidence rules:
 - Every evidence item must state a fact that appears in the tool outputs below, and must name

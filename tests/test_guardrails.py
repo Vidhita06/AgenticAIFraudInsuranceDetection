@@ -215,6 +215,43 @@ def test_fraud_flag_resting_only_on_data_gaps_is_replaced():
     assert [i["guardrail"] for i in iv] == ["unsupported_fraud_flag"]
     assert "POLICY_TERMS_UNVERIFIED" in iv[0]["detail"] and "unsupported_fraud_flag" in d.guardrail_notes[0]
     # a real risk signal keeps the flag
-    for score in (HIGH, {**LOW, "risk_band": "medium"}, {**LOW, "risk_indicators": FLAGS}):
+    for score in (HIGH, {**LOW, "risk_indicators": FLAGS}):
         d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**tr, "fraud_score": score})
         assert d.decision == "FLAG_FOR_INVESTIGATION" and not iv
+    # a strong single SHAP driver does not rescue a low-band flag
+    shap = {"ok": True, "top_factors": [{"feature": "fault", "value": "Policy Holder", "shap_value": 0.5433}]}
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**tr, "shap_explanation": shap})
+    assert d.decision == "APPROVE" and "STRONG_SHAP_DRIVER" not in d.reason_codes
+
+
+MEDIUM = {**LOW, "fraud_probability": 0.0612, "risk_band": "medium"}
+
+
+def test_medium_band_alone_does_not_justify_a_fraud_flag():
+    """Pilot --n 10 (qwen2.5:72b): all 4 medium-band claims were flagged on the band alone."""
+    tr = tools(MEDIUM, policy_verification=PV_UNKNOWN, claim_history=HIST_UNAVAILABLE, similar_claims=SIM_NONE)
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-8162", tr)
+    assert d.decision == "APPROVE" and d.flag_category is None
+    assert iv[0]["guardrail"] == "unsupported_fraud_flag" and "medium band without a concrete factor" in iv[0]["detail"]
+    assert "MEDIUM_MODEL_RISK" in d.reason_codes
+
+
+def test_medium_band_flag_with_a_concrete_factor_is_kept():
+    base = tools(MEDIUM, policy_verification=PV_UNKNOWN, claim_history=HIST_UNAVAILABLE, similar_claims=SIM_NONE)
+    shap = {"ok": True, "top_factors": [{"feature": "accident month", "value": "Mar", "shap_value": 0.61},
+                                        {"feature": "red-flag score", "value": 2.0, "shap_value": 1.9}]}
+    elevated = {**SIM_NONE, "neighbour_frauds": 3, "neighbour_fraud_rate": 0.6}
+    cases = {"RED_FLAGS_PRESENT": {"fraud_score": {**MEDIUM, "risk_indicators": FLAGS}},
+             "SIMILAR_CLAIMS_ELEVATED_FRAUD": {"similar_claims": elevated},
+             "STRONG_SHAP_DRIVER": {"shap_explanation": shap}}
+    for code, extra in cases.items():
+        d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, **extra})
+        assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "FRAUD_RISK" and not iv, code
+        assert code in d.reason_codes
+    # a policy-condition FAIL keeps the flag, but as a coverage question, not fraud
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, "policy_verification": PV_POLICY_FAIL})
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "POLICY_CONDITION"
+    # the red-flag score alone is not a "strong SHAP driver" (it drives every medium score)
+    rf_only = {"ok": True, "top_factors": [{"feature": "red-flag score", "value": 2.0, "shap_value": 1.9}]}
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, "shap_explanation": rf_only})
+    assert d.decision == "APPROVE"
