@@ -6,11 +6,11 @@ config/policy_rules.yaml; the Python checks are registered under the same ids he
 
 Every check is vectorised over a DataFrame of claims and returns a boolean Series
 (True = passed). `validate_claim` applies the same rules to one claim and returns
-`[{rule_id, passed, severity, message}]`, the output of the agent's policy-check tool.
+`[{rule_id, passed, severity, message}]`, used by input validation and the policy-verification tool (Tool 4).
 Rules flag problems; they never modify or "fix" the data.
 
 Severity levels:
-    blocking: the claim cannot be assessed reliably (REQUEST_MORE_INFO).
+    blocking: the claim cannot be assessed reliably (REQUEST_MORE_INFORMATION).
     warning:  inconsistent or suspicious fields an adjuster should look at.
     info:     unusual but plausible context.
 """

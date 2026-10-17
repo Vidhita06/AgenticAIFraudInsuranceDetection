@@ -34,7 +34,7 @@ class TriageRunner:
                   ) -> tuple[str, TriageDecision, list[dict]]:
         thread_id = thread_id or f"claim-{uuid.uuid4().hex[:12]}"
         cfg = {"configurable": {"thread_id": thread_id}, "recursion_limit": 4 * self.deps.max_steps + 20}
-        self.graph.invoke({"raw_claim": dict(claim)}, cfg)
+        self.graph.invoke({"raw_claim": dict(claim), "investigation_id": f"INV-{thread_id}"}, cfg)
         state = self.graph.get_state(cfg).values
         decision = TriageDecision.model_validate(state["decision"])
         self._log({"thread_id": thread_id, "event": "recommendation", "decision": state["decision"],

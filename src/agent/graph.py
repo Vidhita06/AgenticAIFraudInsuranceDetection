@@ -1,12 +1,13 @@
-"""LangGraph triage graph.
+"""LangGraph investigation graph (docs/agent_restructure_plan.md).
 
-    START -> ingest -> validate -> score -> agent <-> tools   (ReAct loop, <= MAX_STEPS turns)
-                                              |
-                                              v
-                    mark_max_steps -> synthesize -> guardrails -> human_review (interrupt) -> END
+    START -> ingest -> validate -> score (Tool 1) -> agent <-> tools (Tools 2-6, <= max_steps turns)
+                                                      |
+                                                      v
+          complete_investigation -> aggregate_evidence -> synthesize -> guardrails -> human_review -> END
 
-Validate and score always run; the agent decides which further tools (similar claims,
-policy checks) to call. Without an LLM the graph still runs and uses the rule-based decision.
+Layer 1 (ingest, validate) and Tool 1 always run. The orchestrator LLM chooses among Tools 2-6;
+complete_investigation runs any required tool it skipped (logged as `auto`). Without an LLM the
+graph still runs every required tool and uses the rule-based decision.
 """
 from __future__ import annotations
 
@@ -21,16 +22,17 @@ def build_graph(deps: NodeDeps | None = None, checkpointer=None):
     deps = deps or NodeDeps()
     n = make_nodes(deps)
     g = StateGraph(ClaimState)
-    for name in ("ingest", "validate", "score", "agent", "tools", "mark_max_steps", "synthesize",
-                 "guardrails", "human_review"):
+    for name in ("ingest", "validate", "score", "agent", "tools", "complete_investigation",
+                 "aggregate_evidence", "synthesize", "guardrails", "human_review"):
         g.add_node(name, n[name])
     g.add_edge(START, "ingest")
     g.add_edge("ingest", "validate")
     g.add_edge("validate", "score")
     g.add_edge("score", "agent")
-    g.add_conditional_edges("agent", n["route_after_agent"], {"tools": "tools", "synthesize": "mark_max_steps"})
+    g.add_conditional_edges("agent", n["route_after_agent"], {"tools": "tools", "synthesize": "complete_investigation"})
     g.add_edge("tools", "agent")
-    g.add_edge("mark_max_steps", "synthesize")
+    g.add_edge("complete_investigation", "aggregate_evidence")
+    g.add_edge("aggregate_evidence", "synthesize")
     g.add_edge("synthesize", "guardrails")
     g.add_edge("guardrails", "human_review")
     g.add_edge("human_review", END)

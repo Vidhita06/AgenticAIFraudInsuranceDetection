@@ -3,14 +3,15 @@
 **Agentic AI: Autonomous Insurance Claims Triage & Fraud Assistant** (IDEA Lab project,
 Ramdeobaba University, Session 2026-27)
 
-A LangGraph agent takes a vehicle insurance claim and works through it in five steps:
+A LangGraph agent investigates a vehicle insurance claim. One orchestrator works with six
+specialised tools (the team plan, mapped in `docs/agent_restructure_plan.md`):
 
-1. validates it;
-2. scores it with a trained fraud model;
-3. retrieves similar past claims;
-4. runs policy checks;
-5. recommends **APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFO** with a grounded
-   rationale.
+1. it validates the claim;
+2. it calls the tools: fraud score, SHAP explanation, policy retrieval, policy verification,
+   similar claims and claim history;
+3. it aggregates the evidence, including missing information and conflicts;
+4. it recommends **APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFORMATION**, with a
+   grounded rationale and reason codes.
 
 A human adjuster has the final say.
 
@@ -57,10 +58,11 @@ config/prompts/            orchestrator_system.md, synthesis.md
 src/schemas/               ClaimSchema (33 fields), TriageDecision, ClaimState
 src/ingestion/             parser (CSV/JSON/dict) + normalizer (lists missing/invalid fields)
 src/retrieval/             encoder, FAISS index build (real train only), search
-src/tools/                 score_claim, find_similar_claims, check_policy_rules (+ LangChain TOOLS)
-src/agent/                 llm.py, nodes.py, guardrails.py, graph.py, runner.py
+src/tools/                 the six tools: score_claim, explain_claim, retrieve_policy, verify_policy,
+                           find_similar_claims, get_claim_history (+ LangChain TOOLS)
+src/agent/                 llm.py, nodes.py, evidence.py (aggregation), guardrails.py, graph.py, runner.py
 scripts/build_vector_index.py
-tests/                     test_validation, test_tools, test_guardrails, test_graph (+ fixtures/)
+tests/                     test_validation, test_tools, test_six_tools, test_guardrails, test_graph (+ fixtures/)
 ```
 
 ```
@@ -168,19 +170,41 @@ print(decision.decision, decision.rationale, decision.evidence)
 runner.resume(thread_id, {"decision": "APPROVE", "adjuster_id": "a1", "override_reason": None})
 ```
 
-How a claim flows through the graph:
+How a claim flows through the graph (`docs/architecture.png`):
 
-1. `ingest → validate → score` always run.
-2. A ReAct loop of at most `agent.max_steps` turns (`config/settings.yaml`) lets the LLM call
-   `find_similar_claims` and `check_policy_rules`.
-3. `synthesize` writes a JSON decision.
-4. `guardrails` enforces, in code:
-   - only APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFO, never a denial;
-   - a blocking validation failure forces REQUEST_MORE_INFO;
+1. `ingest → validate → score` always run. Scoring is Tool 1: probability, predicted class,
+   risk band and the red flags that fired.
+2. The **orchestrator** is a ReAct loop of at most `agent.max_steps` turns. In it, the LLM
+   chooses among Tools 2–6:
+   - `explain_fraud_score`, `retrieve_policy`, `verify_policy`, `find_similar_claims` and
+     `get_claim_history`;
+   - the tools are bound to the claim, so the LLM cannot change it;
+   - prerequisites run first (verification needs retrieval).
+3. `complete_investigation` runs any required tool the LLM skipped
+   (`agent.required_tools`), logged as `auto`. Without an LLM it runs all six.
+4. `aggregate_evidence` builds the evidence record in code:
+   - each tool's status (completed / partial / unavailable / failed / not_run) and origin;
+   - the findings, missing information, conflicts and investigation status.
+5. `synthesize` (the reasoning step) writes a JSON decision, rationale, cited evidence and
+   unresolved questions.
+6. `guardrails` enforces, in code:
+   - only APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFORMATION, never a denial;
+   - a blocking validation failure forces REQUEST_MORE_INFORMATION;
    - a `high` risk band is never approved;
-   - evidence that is not traceable to a tool output is removed;
+   - APPROVE needs a fraud score and no policy-verification FAIL;
+   - evidence that cannot be traced to the output of the tool it cites is removed;
    - after two LLM failures, a rule-based decision is used.
-5. `human_review` pauses the run (LangGraph `interrupt`) for the adjuster.
+
+   It also adds the reason codes and the plan's final-output fields from the evidence record.
+7. `human_review` pauses the run (LangGraph `interrupt`) for the adjuster.
+
+**Data limits, reported rather than invented:**
+
+- The Kaggle data has no policy documents. Policy retrieval reads `data/policies/<PolicyNumber>.json`
+  when one exists; otherwise it reports `partial` and lists what is missing. Verification
+  checks that need policy terms return `UNKNOWN`.
+- `PolicyNumber` is unique per claim, so there is no linked claim history. Tool 6 reports
+  `unavailable` unless `claim_history.source` names an authorised file.
 
 Without an API key the agent still runs and returns the rule-based decision.
 `pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and

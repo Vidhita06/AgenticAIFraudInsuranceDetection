@@ -9,7 +9,7 @@ from src.ingestion.normalizer import normalize_claim
 from src.ingestion.parser import parse_claims
 from src.ml.predict import load_artifacts, score_claims
 from src.schemas.claim import ClaimSchema
-from src.tools import TOOLS, agent_tools, check_policy_rules, find_similar_claims, score_claim
+from src.tools import TOOLS, agent_tools, find_similar_claims, score_claim, verify_policy
 
 needs_models = pytest.mark.skipif(not (path_for("models_dir") / "fraud_model.joblib").exists(),
                                   reason="model artifacts not present")
@@ -35,28 +35,17 @@ def test_score_claim_tool(sample_claims):
     res = score_claim(sample_claims[1])
     assert res["ok"] is True
     assert 0 <= res["fraud_probability"] <= 1
-    assert res["risk_band"] in ("low", "medium", "high")
-    assert 1 <= len(res["top_factors"]) <= 5
-    for f in res["top_factors"]:
-        assert {"feature", "value", "shap_contribution", "reason"} <= set(f)
+    assert res["risk_band"] in ("low", "medium", "high") and res["status"] == "completed"
+    assert res["predicted_class"] == ("fraud" if res["fraud_probability"] >= res["decision_threshold"] else "not_fraud")
+    assert res["model"]["version"] == res["model_version"] and "top_factors" not in res     # SHAP is Tool 2
+    assert {"RF01_PH_FAULT_ALL_PERILS"} <= {f["rule_id"] for f in res["risk_indicators"]}
+    assert all("support" in f for f in res["risk_indicators"])
     json.dumps(res)  # JSON-serialisable
 
 
 def test_score_claim_rejects_invalid_claim(sample_claims):
     res = score_claim(sample_claims[-1])
     assert res["ok"] is False and "schema" in res["error"]
-
-
-def test_policy_check_tool(sample_claims):
-    missing_age = check_policy_rules(sample_claims[3])
-    assert missing_age["ok"] and missing_age["blocking"]
-    assert "V03_AGE_MISSING" in {r["rule_id"] for r in missing_age["failed_rules"]}
-    tp = check_policy_rules(sample_claims[2])
-    assert "RF04_THIRD_PARTY_DEDUCTIBLE_500" in {f["rule_id"] for f in tp["red_flags"]}
-    assert all("support" in f for f in tp["red_flags"])
-    incomplete = check_policy_rules(sample_claims[-1])
-    assert incomplete["ok"] and incomplete["blocking"] and incomplete["schema_issues"]
-    json.dumps(tp)
 
 
 def test_similar_claims_tool(sample_claims, vector_store):
@@ -82,12 +71,16 @@ def test_index_excludes_synthetic_validation_and_test(vector_store):
 
 
 def test_langchain_wrappers(sample_claims, vector_store):
-    names = {t.name for t in TOOLS}
-    assert names == {"score_claim", "find_similar_claims", "check_policy_rules"}
-    assert TOOLS[2].invoke({"claim": sample_claims[3]})["blocking"] is True
+    names = [t.name for t in TOOLS]
+    assert names == ["score_claim", "explain_claim", "retrieve_policy", "verify_policy", "find_similar_claims",
+                     "get_claim_history"]
+    assert TOOLS[3].invoke({"claim": sample_claims[0]})["overall_result"] in ("PASS", "FAIL", "UNKNOWN")
     bound = {t.name: t for t in agent_tools(sample_claims[0])}
+    assert set(bound) == {"explain_fraud_score", "retrieve_policy", "verify_policy", "find_similar_claims",
+                          "get_claim_history"}
     assert bound["find_similar_claims"].invoke({"k": 2})["k"] == 2
-    assert bound["check_policy_rules"].invoke({})["ok"]
+    assert bound["verify_policy"].invoke({})["ok"]
+    assert bound["get_claim_history"].invoke({})["status"] == "unavailable"
 
 
 def test_parser_and_normalizer(sample_claims, tmp_path):

@@ -122,23 +122,27 @@ class CostEstimate:
 def _static_tokens_per_claim(claim: Mapping[str, Any]) -> tuple[float, float]:
     """Token estimate for one agent run from the actual prompt sizes: the tools are local,
     so their outputs are computed (free) and measured."""
+    from src.agent.evidence import compact_for_prompt
     from src.agent.nodes import KEY_FIELDS, PROMPTS
-    from src.tools import check_policy_rules, find_similar_claims, score_claim
+    from src.tools import (explain_claim, find_similar_claims, get_claim_history, retrieve_policy, score_claim,
+                           verify_policy)
     cfg = load_config()["evaluation"]
     orch = len((PROMPTS / "orchestrator_system.md").read_text())
     synth = len((PROMPTS / "synthesis.md").read_text())
     ctx = len(json.dumps({k: claim.get(k) for k in KEY_FIELDS}, default=str))
-    score = len(json.dumps(score_claim(claim), default=str))
-    policy = len(json.dumps(check_policy_rules(claim), default=str))
-    similar = len(json.dumps(find_similar_claims(claim, 5), default=str))
-    tool_schemas = 1200
+    size = lambda src, out: len(json.dumps(compact_for_prompt(src, out), default=str))
+    score = size("fraud_score", score_claim(claim))
+    # agent-callable tool outputs, in a typical call order
+    later = [size("policy_verification", verify_policy(claim)), size("similar_claims", find_similar_claims(claim, 5)),
+             size("shap_explanation", explain_claim(claim)), size("policy_retrieval", retrieve_policy(claim)),
+             size("claim_history", get_claim_history(claim))]
+    tool_schemas = 2400
     calls = cfg["est_agent_calls_per_claim"]
     out_agent = cfg["est_output_tokens_agent_call"]
     # agent turn i sees the system prompt, context, tool schemas, all earlier outputs and tool results
     base = orch + ctx + score + 800 + tool_schemas
-    agent_in = sum(base + (policy if i >= 1 else 0) + (similar if i >= 2 else 0) + i * out_agent * CHARS_PER_TOKEN
-                   for i in range(calls)) / CHARS_PER_TOKEN
-    synth_in = (synth + score + policy + similar + 800) / CHARS_PER_TOKEN
+    agent_in = sum(base + sum(later[:i]) + i * out_agent * CHARS_PER_TOKEN for i in range(calls)) / CHARS_PER_TOKEN
+    synth_in = (synth + score + sum(later) + 1500 + 800) / CHARS_PER_TOKEN
     return agent_in + synth_in, calls * out_agent + cfg["est_output_tokens_synthesis"]
 
 
@@ -209,7 +213,7 @@ class UsageTracker(BaseCallbackHandler):
 
 
 def model_only_decision(tool_results: Mapping[str, Any]) -> str:
-    """The threshold policy without the agent: blocking -> REQUEST_MORE_INFO,
+    """The threshold policy without the agent: blocking -> REQUEST_MORE_INFORMATION,
     high band -> FLAG, otherwise APPROVE (same rules as the rule-based fallback)."""
     from src.agent.guardrails import rule_based_decision
     return rule_based_decision("", {"validation": tool_results.get("validation"),
@@ -246,7 +250,10 @@ def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_inde
         d = state.get("decision") or {}
         tr = state.get("tool_results") or {}
         trace = state.get("trace") or []
-        calls = [c["name"] for t in trace if t["node"] == "tools" for c in t.get("calls", [])]
+        calls = [c["name"] for t in trace if t["node"] == "tools" for c in t.get("calls", [])
+                 if c.get("origin", "agent") == "agent"]
+        auto = [n for t in trace if t["node"] == "complete_investigation" for n in t.get("auto_tools", [])]
+        record = state.get("evidence_record") or {}
         interventions = [iv["guardrail"] for t in trace if t["node"] == "guardrails" for iv in t.get("interventions", [])]
         cost = ((tracker.input_tokens * price["input"] + tracker.output_tokens * price["output"]) / 1e6
                 if price else 0.0)
@@ -256,7 +263,13 @@ def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_inde
             "decision": d.get("decision"), "decided_by": d.get("decided_by"),
             "model_only_decision": model_only_decision(tr) if tr else None,
             "fraud_probability": d.get("fraud_probability"), "risk_band": d.get("risk_band"),
-            "tools_called": calls, "agent_steps": int(state.get("steps", 0) or 0),
+            "tools_called": calls, "auto_tools": auto, "agent_steps": int(state.get("steps", 0) or 0),
+            "investigation_id": d.get("investigation_id"), "investigation_status": d.get("investigation_status"),
+            "reason_codes": d.get("reason_codes", []),
+            "tool_statuses": {k: v["status"] for k, v in (record.get("tool_statuses") or {}).items()},
+            "n_missing_information": len(d.get("missing_information", [])),
+            "conflicting_evidence": d.get("conflicting_evidence", []),
+            "unresolved_questions": d.get("unresolved_questions", []),
             "max_steps_reached": bool(state.get("max_steps_reached", False)),
             "llm_failures": int(state.get("llm_failures", 0) or 0),
             "interventions": interventions,
@@ -298,7 +311,15 @@ def load_results(paths: Iterable[str | Path]) -> pd.DataFrame:
     rows = []
     for p in paths:
         rows += [json.loads(l) for l in Path(p).read_text(encoding="utf-8").splitlines() if l.strip()]
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    from src.schemas.decision import normalize_decision     # results written before the label rename
+    for col in ("decision", "model_only_decision"):
+        if col in df:
+            df[col] = df[col].map(lambda x: normalize_decision(x) if isinstance(x, str) else x)
+    for col in ("auto_tools", "reason_codes", "conflicting_evidence"):
+        if col in df:
+            df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
+    return df
 
 
 def _rate(k: int, n: int) -> dict[str, Any]:
@@ -320,7 +341,7 @@ def decision_quality(df: pd.DataFrame, legit_weight: float = 1.0) -> pd.DataFram
             "fraud -> FLAG (recall)": (flag_f, len(fr)),
             "legit -> APPROVE": (int((lg[col] == "APPROVE").sum()), len(lg)),
             "legit -> FLAG (false-flag rate)": (flag_l, len(lg)),
-            "REQUEST_MORE_INFO (all claims)": (int((d[col] == "REQUEST_MORE_INFO").sum()), len(d)),
+            "REQUEST_MORE_INFORMATION (all claims)": (int((d[col] == "REQUEST_MORE_INFORMATION").sum()), len(d)),
         }.items():
             rows.append({"policy": name, "metric": metric, **_rate(k, n)})
         rows.append({"policy": name, "metric": "FLAG precision (sample)", "k": flag_f, "n": flag_f + flag_l,
@@ -338,13 +359,19 @@ def agreement_table(df: pd.DataFrame) -> pd.DataFrame:
 def process_metrics(df: pd.DataFrame) -> dict[str, Any]:
     d = df[df.run_index == 0]
     n = len(d)
-    tool_rate = {t: float(d.tools_called.apply(lambda c: t in c).mean())
-                 for t in ("check_policy_rules", "find_similar_claims")}
+    from src.tools import AGENT_TOOL_TO_SOURCE
+    tool_rate = {t: float(d.tools_called.apply(lambda c: t in c).mean()) for t in AGENT_TOOL_TO_SOURCE}
+    auto = d["auto_tools"] if "auto_tools" in d else pd.Series([[]] * n, index=d.index)
+    auto_rate = {t: float(auto.apply(lambda c: t in c).mean()) for t in AGENT_TOOL_TO_SOURCE}
+    codes = pd.Series([c for lst in (d["reason_codes"] if "reason_codes" in d else []) for c in lst]).value_counts()
     iv = pd.Series([x for lst in d.interventions for x in lst]).value_counts().to_dict()
     lat = d.latency_s
     return {
         "claims": n, "errors": int(d.error.notna().sum()),
         "tool_use_rate": tool_rate,
+        "auto_run_rate": auto_rate,
+        "reason_code_counts": {k: int(v) for k, v in codes.items()},
+        "claims_with_conflicts": int(d["conflicting_evidence"].apply(len).gt(0).sum()) if "conflicting_evidence" in d else 0,
         "mean_tool_calls": float(d.tools_called.apply(len).mean()),
         "mean_agent_steps": float(d.agent_steps.mean()),
         "max_steps_hits": int(d.max_steps_reached.sum()),
@@ -380,10 +407,12 @@ JUDGE_PROMPT = """You are auditing an insurance-claim triage recommendation. Gra
 tool outputs it was based on. Answer each question with 1 (yes) or 0 (no):
 
 - cites_evidence: does the rationale rely on specific facts from the tool outputs (scores,
-  rule ids, red flags, similar-claim outcomes)?
+  rule ids, red flags, SHAP factors, policy checks, similar-claim outcomes)?
 - consistent_with_score: is the decision consistent with the fraud score and risk band? A
   high band should be flagged. If not, does the rationale explain why?
 - no_invented_facts: is every fact in the rationale and evidence supported by the tool outputs?
+  Treating missing information (e.g. an unavailable policy document or claim history) as a
+  negative finding counts as an invented fact.
 - clear_for_adjuster: could an adjuster act on it without re-reading the raw data?
 
 Respond with ONLY a JSON object:
@@ -408,8 +437,9 @@ def judge_rationales(df: pd.DataFrame, llm, n: int = 40, seed: int = 42,
     d = d.sample(min(n, len(d)), random_state=seed) if len(d) else d
     rows = []
     for r in d.to_dict("records"):
-        tools = {k: v for k, v in (r.get("tool_results") or {}).items()}
-        prompt = JUDGE_PROMPT.replace("{tools}", json.dumps(tools, default=str)[:12000]) \
+        from src.agent.evidence import compact_for_prompt
+        tools = {k: compact_for_prompt(k, v) for k, v in (r.get("tool_results") or {}).items()}
+        prompt = JUDGE_PROMPT.replace("{tools}", json.dumps(tools, default=str)[:16000]) \
             .replace("{decision}", str(r["decision"])).replace("{rationale}", str(r["rationale"])) \
             .replace("{evidence}", json.dumps(r["evidence"], default=str))
         try:

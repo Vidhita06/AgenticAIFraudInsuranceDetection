@@ -48,9 +48,9 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending · ⏸ deferred.
 | D4 | **Advanced models**: XGBoost and a neural network (PyTorch or TensorFlow) | P5 | ✅ XGBoost, LightGBM (final), PyTorch MLP (CPU, §5) |
 | D5 | **Class-imbalance handling** | P5 (class weights, `scale_pos_weight`, focal loss; synthetic augmentation experiment) | ✅ class weights / `scale_pos_weight`, synthetic down-weighting |
 | D6 | Evaluation with **accuracy, precision, recall, F1, AUC-ROC** | P5, P6 | ✅ test metrics with 95% CIs (`02_model_report.md` §6) |
-| D7 | Callable **tool: fraud scoring** | P7 (`score_claim`, `explain_claim`) | ✅ `src/tools/fraud_score_tool.py` |
+| D7 | Callable **tool: fraud scoring** | P7 (`score_claim`, `explain_claim`) | ✅ `src/tools/fraud_score_tool.py` (Tool 1), `shap_explanation_tool.py` (Tool 2) |
 | D8 | Callable **tool: similar-claims retrieval** (FAISS/ChromaDB) | P7 (`find_similar_claims`) | ✅ `src/tools/similar_claims_tool.py` |
-| D9 | Callable **tool: policy/history checks** | P1 (rules), P3 (red flags), P7 (`check_policy_rules`) | ✅ `src/tools/policy_check_tool.py` |
+| D9 | Callable **tool: policy/history checks** | P1 (rules), P3 (red flags), team plan Tools 3, 4, 6 | ✅ `policy_retrieval_tool.py`, `policy_verification_tool.py` (PASS/FAIL/UNKNOWN), `claim_history_tool.py`. The data has no policy documents or linked history, so these report `partial` / `UNKNOWN` / `unavailable` instead of inventing them. |
 | D10 | Functional agentic pipeline (orchestrator + tools) | Later | 🟡 built (`src/agent/`); live LLM run pending |
 | D11 | Dashboard: submit a claim, view decision and rationale, approve or override | Later | ⏸ deferred |
 | D12 | End-to-end pipeline runs on **held-out claims without manual intervention** | Later (P7 designs the evaluation) | ⬜ `scripts/run_batch_triage.py all` (needs API key) |

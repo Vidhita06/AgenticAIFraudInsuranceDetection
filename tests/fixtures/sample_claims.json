@@ -139,7 +139,7 @@
    "NumberOfCars": "1 vehicle",
    "Year": 1994,
    "BasePolicy": "All Perils",
-   "_note": "age not recorded (blocking V03 -> REQUEST_MORE_INFO)"
+   "_note": "age not recorded (blocking V03 -> REQUEST_MORE_INFORMATION)"
   },
   {
    "Fault": "Third Party",

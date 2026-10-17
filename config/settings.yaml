@@ -8,6 +8,9 @@ paths:
   real_validation: data/processed/real_validation.csv
   real_test: data/processed/real_test.csv
   policy_rules: config/policy_rules.yaml
+  # Tool 3 source: actual policy documents, one <PolicyNumber>.json each (none ship with the
+  # repository; without them policy retrieval reports the claim-recorded attributes only).
+  policy_store_dir: data/policies
   prompts_dir: config/prompts
   vector_store_dir: data/vector_store
   models_dir: models
@@ -43,9 +46,16 @@ retrieval:
 
 agent:
   max_steps: 8
-  # Run check_policy_rules before synthesis if the model never called it (safety net for
-  # small local models; logged as an automatic call, not an agent tool choice).
-  auto_policy_check: true
+  # Evidence sources that must be present before reasoning. If the orchestrator LLM did not
+  # call one, complete_investigation runs it (logged as `auto`, not as an agent choice). All
+  # are local and deterministic. similar_claims and claim_history stay the agent's choice.
+  required_tools: [fraud_score, shap_explanation, policy_retrieval, policy_verification]
+
+# Tool 6 source: an authorised claim-history file (CSV / JSONL with policy_id or customer_id,
+# claim_id, claim_date, incident_type, status, outcome). The project data has none
+# (PolicyNumber is unique per claim), so the tool reports `unavailable`.
+claim_history:
+  source: null
 
 # Model inputs (decided in the Step A EDA, docs/report/01_eda_report.md §5).
 # Excluded: PolicyNumber, is_synthetic (leakage); PolicyType, AgeOfPolicyHolder (display only);

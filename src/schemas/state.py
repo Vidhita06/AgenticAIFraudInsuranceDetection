@@ -16,9 +16,12 @@ class ClaimState(TypedDict, total=False):
     raw_claim: dict[str, Any]                       # input as received
     claim: dict[str, Any]                           # normalised claim fields
     claim_id: str
+    investigation_id: str
     normalization_issues: list[str]
     messages: Annotated[list[AnyMessage], add_messages]   # agent conversation
-    tool_results: Annotated[dict[str, Any], merge_dicts]  # tool name -> latest output
+    tool_results: Annotated[dict[str, Any], merge_dicts]  # evidence source -> latest output
+    tool_origin: Annotated[dict[str, str], merge_dicts]   # source -> orchestrator|agent|dependency|auto
+    evidence_record: Optional[dict[str, Any]]       # consolidated evidence (aggregate_evidence)
     steps: int                                      # agent (LLM) turns used
     max_steps_reached: bool
     llm_failures: int

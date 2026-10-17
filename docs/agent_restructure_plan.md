@@ -92,7 +92,8 @@ missing. The repository's data supports the following:
   in the plan. The old `REQUEST_MORE_INFO` is still accepted when parsing model output.
 - **Evidence sources:** `validation`, `fraud_score`, `shap_explanation`, `policy_retrieval`,
   `policy_verification`, `similar_claims` and `claim_history`. Every fact must still be
-  grounded in its source tool's output.
+  grounded in its source tool's output. A source that reported `unavailable` can be cited only
+  for that limitation, never as a negative finding (e.g. "no previous claims").
 - **Fields filled in code:** the LLM writes only the decision, rationale, evidence and
   unresolved questions. Reason codes, missing information, conflicts and tool statuses come
   from the evidence record, so they cannot be hallucinated.

@@ -29,63 +29,147 @@ def tool_call(name, args=None, i=0):
     return AIMessage(content="", tool_calls=[{"name": name, "args": args or {}, "id": f"call_{name}_{i}"}])
 
 
+def tool_calls(*names):
+    return AIMessage(content="", tool_calls=[{"name": n, "args": {}, "id": f"call_{n}_{i}"} for i, n in enumerate(names)])
+
+
 def answer(decision, *evidence):
     return AIMessage(content=json.dumps({"decision": decision, "rationale": "Summary of the evidence for the adjuster.",
                                          "evidence": [{"source_tool": s, "fact": f} for s, f in evidence]}))
 
 
 def score_stub(band, p):
-    return lambda claim: {"ok": True, "claim_id": "PN", "fraud_probability": p, "risk_band": band,
-                          "top_factors": [], "model_version": "test"}
+    flags = [{"rule_id": "RF01_PH_FAULT_ALL_PERILS", "severity": "warning", "support": "15.7% fraud in 1944 claims"}]
+    return lambda claim: {"ok": True, "status": "completed", "claim_id": "PN", "fraud_probability": p,
+                          "risk_band": band, "predicted_class": "fraud" if band == "high" else "not_fraud",
+                          "risk_indicators": flags if band == "high" else [], "model_version": "test"}
 
 
-SIM = lambda claim, k=5: {"ok": True, "claim_id": "PN", "k": 3, "neighbour_frauds": 2, "neighbour_fraud_rate": 0.667,
-                          "neighbours": [{"policy_number": i, "similarity": 0.9, "fraud_label": int(i < 3)} for i in (1, 2, 3)]}
-POLICY = lambda claim: {"ok": True, "claim_id": "PN", "blocking": False, "failed_rules": [], "red_flags": [
-    {"rule_id": "RF01_PH_FAULT_ALL_PERILS", "severity": "warning", "support": "15.7% fraud in 1944 claims"}]}
+EXPLAIN = lambda claim, top_k=5, fraud_score=None: {
+    "ok": True, "status": "completed", "top_factors": [{"feature": "fault", "value": "Policy Holder", "shap_value": 0.3476,
+                                                        "direction": "increases fraud score"}],
+    "positive_factors": ["fault"], "negative_factors": []}
+RETRIEVE = lambda claim: {"ok": True, "status": "partial", "policy_id": "PN-1", "document_found": False,
+                          "document_lookup": "no policy document store", "missing_information": ["policy version"]}
 
 
-def runner(llm, band="low", p=0.0312, max_steps=8):
-    deps = NodeDeps(llm=llm, scorer=score_stub(band, p), similar=SIM, policy=POLICY, max_steps=max_steps)
-    return TriageRunner(deps=deps)
+def verify_stub(fail=False):
+    def f(claim, policy=None):
+        assert policy is not None and policy.get("ok"), "retrieval must run first"
+        checks = [{"check_id": "PV04_CLAIM_TIMELINE", "result": "FAIL" if fail else "PASS", "reason": "timeline"},
+                  {"check_id": "PV08_COVERAGE_LIMITS", "result": "UNKNOWN", "reason": "no amount"}]
+        return {"ok": True, "status": "completed", "overall_result": "FAIL" if fail else "UNKNOWN",
+                "counts": {"PASS": 0 if fail else 1, "FAIL": int(fail), "UNKNOWN": 1}, "checks": checks,
+                "failed_checks": ["PV04_CLAIM_TIMELINE"] if fail else [], "unknown_checks": ["PV08_COVERAGE_LIMITS"]}
+    return f
+
+
+SIM = lambda claim, k=5, same_base_policy=False: {
+    "ok": True, "status": "completed", "claim_id": "PN", "k": 3, "neighbour_frauds": 2, "neighbour_fraud_rate": 0.667,
+    "historical_base_rate": 0.0599,
+    "neighbours": [{"claim_id": f"PN-{i}", "policy_number": i, "similarity": 0.9, "fraud_label": int(i < 3)}
+                   for i in (1, 2, 3)]}
+HISTORY = lambda claim, years=5: {"ok": True, "status": "unavailable", "history_available": False,
+                                  "previous_claim_count": None, "previous_claims": [],
+                                  "limitation": "No authorised claim-history source is configured."}
+
+
+def deps_for(llm, band="low", p=0.0312, max_steps=8, fail=False, **kw):
+    return NodeDeps(llm=llm, scorer=score_stub(band, p), explainer=EXPLAIN, policy_retriever=RETRIEVE,
+                    policy_verifier=verify_stub(fail), similar=SIM, history=HISTORY, max_steps=max_steps, **kw)
+
+
+def runner(llm, band="low", p=0.0312, max_steps=8, fail=False):
+    return TriageRunner(deps=deps_for(llm, band, p, max_steps, fail))
+
+
+def agent_calls(trace):
+    return [c["name"] for t in trace if t["node"] == "tools" for c in t["calls"] if c.get("origin") == "agent"]
+
+
+def auto_tools(trace):
+    return [t for t in trace if t["node"] == "complete_investigation"][0]["auto_tools"]
 
 
 def test_approve_path(sample_claims):
-    r = runner(scripted(tool_call("check_policy_rules"), AIMessage(content="Low risk, no red flags of note."),
+    r = runner(scripted(tool_call("verify_policy"), AIMessage(content="Low risk, no policy failures."),
                         answer("APPROVE", ("fraud_score", "Fraud probability 0.0312 in the low band"))))
     tid, d, trace = r.run_claim(sample_claims[0])
     assert d.decision == "APPROVE" and d.decided_by == "llm" and d.requires_human_review
     assert [e.fact for e in d.evidence] == ["Fraud probability 0.0312 in the low band"]
     nodes = [t["node"] for t in trace]
-    assert nodes[:3] == ["ingest", "validate", "score"] and "tools" in nodes and nodes[-1] == "guardrails"
+    assert nodes[:3] == ["ingest", "validate", "score"] and "tools" in nodes
+    assert nodes[-4:] == ["complete_investigation", "aggregate_evidence", "synthesize", "guardrails"]
+    assert auto_tools(trace) == ["explain_fraud_score"]           # required, not called by the agent
+    assert d.investigation_id == f"INV-{tid}" and d.investigation_status == "complete"
+    assert {"LOW_MODEL_RISK", "POLICY_TERMS_UNVERIFIED", "NO_MATERIAL_CONCERNS"} <= set(d.reason_codes)
+    st = {k: (v.status, v.origin) for k, v in d.tool_statuses.items()}
+    assert st["policy_verification"] == ("completed", "agent") and st["policy_retrieval"] == ("partial", "dependency")
+    assert st["fraud_score"] == ("completed", "orchestrator") and st["shap_explanation"] == ("completed", "auto")
+    assert st["similar_claims"] == ("not_run", None) and st["claim_history"] == ("not_run", None)
 
 
-def test_flag_path_with_similar_claims(sample_claims):
-    r = runner(scripted(tool_call("find_similar_claims", {"k": 3}), tool_call("check_policy_rules", i=1),
+def test_flag_path_with_all_agent_tools(sample_claims):
+    r = runner(scripted(tool_calls("find_similar_claims", "verify_policy", "explain_fraud_score", "get_claim_history"),
                         AIMessage(content="Evidence gathered."),
                         answer("FLAG_FOR_INVESTIGATION", ("fraud_score", "Fraud probability 0.4123 (high band)"),
                                ("similar_claims", "2 of 3 most similar past claims were fraudulent"),
-                               ("policy_check", "Red flag RF01_PH_FAULT_ALL_PERILS fired"))),
+                               ("fraud_score", "Red flag RF01_PH_FAULT_ALL_PERILS fired"),
+                               ("shap_explanation", "fault = Policy Holder adds 0.3476"))),
                band="high", p=0.4123)
     tid, d, trace = r.run_claim(sample_claims[1])
-    assert d.decision == "FLAG_FOR_INVESTIGATION" and len(d.evidence) == 3 and not d.guardrail_notes
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and len(d.evidence) == 4 and not d.guardrail_notes
     assert d.similar_claim_ids == ["PN-1", "PN-2", "PN-3"]
-    calls = [c["name"] for t in trace if t["node"] == "tools" for c in t["calls"]]
-    assert calls == ["find_similar_claims", "check_policy_rules"]
+    assert agent_calls(trace) == ["find_similar_claims", "verify_policy", "explain_fraud_score", "get_claim_history"]
+    assert auto_tools(trace) == []
+    assert d.claim_history_summary["status"] == "unavailable"
+    assert any(m.startswith("Claim history unavailable") for m in d.missing_information)
+    assert {"HIGH_MODEL_RISK", "RED_FLAGS_PRESENT", "SIMILAR_CLAIMS_ELEVATED_FRAUD",
+            "CLAIM_HISTORY_UNAVAILABLE"} <= set(d.reason_codes)
 
 
-def test_request_more_info_overrides_llm_approve(sample_claims):
+def test_dependency_retrieval_runs_before_verification(sample_claims):
+    r = runner(scripted(tool_call("verify_policy"), AIMessage(content="done"), answer("APPROVE")))
+    tid, d, trace = r.run_claim(sample_claims[0])
+    calls = [t for t in trace if t["node"] == "tools"][0]["calls"]
+    assert [(c["name"], c["origin"]) for c in calls] == [("retrieve_policy", "dependency"), ("verify_policy", "agent")]
+
+
+def test_request_more_information_overrides_llm_approve(sample_claims):
     r = runner(scripted(AIMessage(content="Validation is blocking; no tools needed."), answer("APPROVE")))
     tid, d, _ = r.run_claim(sample_claims[3])               # Age = 0
-    assert d.decision == "REQUEST_MORE_INFO"
+    assert d.decision == "REQUEST_MORE_INFORMATION" and d.investigation_status == "blocked"
     assert any(n.startswith("blocking_validation") for n in d.guardrail_notes)
+    assert "BLOCKING_VALIDATION" in d.reason_codes
+
+
+def test_policy_fail_blocks_approval(sample_claims):
+    r = runner(scripted(tool_call("verify_policy"), AIMessage(content="done"), answer("APPROVE")), fail=True)
+    tid, d, _ = r.run_claim(sample_claims[0])
+    assert d.decision == "REQUEST_MORE_INFORMATION"
+    assert any(n.startswith("approve_needs_policy_pass") for n in d.guardrail_notes)
+    assert d.policy_findings["verification"]["failed"][0]["check_id"] == "PV04_CLAIM_TIMELINE"
+    assert d.conflicting_evidence            # low band but a policy FAIL
 
 
 def test_incomplete_claim_is_not_scored_and_requests_info(sample_claims):
     r = runner(None)
     tid, d, trace = r.run_claim(sample_claims[-1])
-    assert d.decision == "REQUEST_MORE_INFO" and d.fraud_probability is None
+    assert d.decision == "REQUEST_MORE_INFORMATION" and d.fraud_probability is None
     assert any("missing field" in v for v in d.validation_issues)
+    assert auto_tools(trace) == []                             # nothing runs on an invalid claim
+    assert d.tool_statuses["fraud_score"].status == "failed"
+
+
+def test_without_llm_the_orchestrator_runs_all_six_tools(sample_claims):
+    r = runner(None, band="high", p=0.4123)
+    tid, d, trace = r.run_claim(sample_claims[1])
+    assert auto_tools(trace) == ["explain_fraud_score", "retrieve_policy", "verify_policy", "find_similar_claims",
+                                 "get_claim_history"]
+    assert all(v.status != "not_run" for v in d.tool_statuses.values())
+    assert d.decided_by == "rule_fallback" and d.decision == "FLAG_FOR_INVESTIGATION"
+    assert {e.source_tool for e in d.evidence} >= {"fraud_score", "shap_explanation", "policy_verification",
+                                                   "similar_claims", "claim_history"}
 
 
 def test_llm_failure_falls_back_to_rules(sample_claims):
@@ -111,9 +195,16 @@ def test_invalid_output_once_then_valid(sample_claims):
     assert d.decided_by == "llm" and d.decision == "APPROVE"
 
 
+def test_unresolved_questions_are_kept(sample_claims):
+    msg = AIMessage(content=json.dumps({"decision": "REQUEST_MORE_INFO", "rationale": "Policy dates are unknown here.",
+                                        "evidence": [], "unresolved_questions": ["What are the policy's validity dates?"]}))
+    tid, d, _ = runner(scripted(AIMessage(content="ok"), msg)).run_claim(sample_claims[0])
+    assert d.decision == "REQUEST_MORE_INFORMATION" and d.unresolved_questions == ["What are the policy's validity dates?"]
+
+
 def test_max_steps_cutoff(sample_claims):
-    loop = [tool_call("check_policy_rules", i=i) for i in range(10)]
-    r = runner(scripted(*loop, answer("APPROVE", ("policy_check", "RF01_PH_FAULT_ALL_PERILS fired"))), max_steps=3)
+    loop = [tool_call("verify_policy", i=i) for i in range(10)]
+    r = runner(scripted(*loop, answer("APPROVE", ("policy_verification", "PV04_CLAIM_TIMELINE: 0 FAIL"))), max_steps=3)
     tid, d, trace = r.run_claim(sample_claims[0])
     assert sum(t["node"] == "agent" for t in trace) == 3
     assert sum(t["node"] == "tools" for t in trace) == 2
@@ -124,15 +215,22 @@ def test_max_steps_cutoff(sample_claims):
 def test_hallucinated_evidence_removed_in_graph(sample_claims):
     r = runner(scripted(AIMessage(content="done"),
                         answer("APPROVE", ("fraud_score", "Fraud probability 0.0312"),
-                               ("similar_claims", "0 of 5 similar claims were fraud"))))
+                               ("similar_claims", "0 of 5 similar claims were fraud"),
+                               ("claim_history", "No previous claims in 5 years"))))
     tid, d, _ = r.run_claim(sample_claims[0])
     assert [e.source_tool for e in d.evidence] == ["fraud_score"]
-    assert any(n.startswith("evidence_grounding") for n in d.guardrail_notes)
+    assert sum(n.startswith("evidence_grounding") for n in d.guardrail_notes) == 2
+
+
+def test_unknown_tool_is_reported_not_run(sample_claims):
+    r = runner(scripted(tool_call("delete_claim"), AIMessage(content="done"), answer("APPROVE")))
+    tid, d, trace = r.run_claim(sample_claims[0])
+    calls = [t for t in trace if t["node"] == "tools"][0]["calls"]
+    assert calls == [{"name": "delete_claim", "args": {}, "ok": False, "origin": "agent"}]
 
 
 def test_human_review_interrupt_and_resume(sample_claims, tmp_path):
-    deps = NodeDeps(llm=None, scorer=score_stub("high", 0.4123), similar=SIM, policy=POLICY)
-    r = TriageRunner(deps=deps, audit_log=tmp_path / "audit.jsonl")
+    r = TriageRunner(deps=deps_for(None, "high", 0.4123), audit_log=tmp_path / "audit.jsonl")
     tid, d, _ = r.run_claim(sample_claims[1])
     state = r.graph.get_state({"configurable": {"thread_id": tid}})
     assert state.next == ("human_review",)                    # paused for the adjuster
@@ -285,8 +383,7 @@ def ollama_runner(fake, band="high", p=0.4123):
     os.environ["OLLAMA_BASE_URL"] = fake.url
     llm = get_llm(provider="ollama", model="qwen2.5:7b")
     synth = get_llm(provider="ollama", model="qwen2.5:7b", json_mode=True)
-    deps = NodeDeps(llm=llm, synth_llm=synth, scorer=score_stub(band, p), similar=SIM, policy=POLICY)
-    return TriageRunner(deps=deps)
+    return TriageRunner(deps=deps_for(llm, band, p, synth_llm=synth))
 
 
 def decision_json(decision, *evidence):
@@ -307,20 +404,22 @@ def test_ollama_native_tool_calls_end_to_end(sample_claims):
         fake.close()
     assert d.decision == "FLAG_FOR_INVESTIGATION" and d.decided_by == "llm" and len(d.evidence) == 2
     agent_req, synth_req = fake.requests[0], fake.requests[-1]
-    assert {t["function"]["name"] for t in agent_req["tools"]} == {"find_similar_claims", "check_policy_rules"}
+    assert {t["function"]["name"] for t in agent_req["tools"]} == {"explain_fraud_score", "retrieve_policy",
+                                                                     "verify_policy", "find_similar_claims",
+                                                                     "get_claim_history"}
     assert agent_req["options"]["num_ctx"] >= 16384 and agent_req["options"]["temperature"] == 0
     assert synth_req.get("format") == "json" and not synth_req.get("tools")      # no tools offered
-    calls = [c["name"] for t in trace if t["node"] == "tools" for c in t["calls"]]
-    assert calls == ["find_similar_claims"]
-    auto = [t for t in trace if t["node"] == "max_steps_check"][0]["auto_tools"]
-    assert auto == ["check_policy_rules"]          # model never called it: safety net ran
+    assert agent_calls(trace) == ["find_similar_claims"]
+    # the model never called the required tools: complete_investigation ran them
+    assert auto_tools(trace) == ["explain_fraud_score", "retrieve_policy", "verify_policy"]
 
 
 def test_ollama_tool_call_written_as_text_is_recovered(sample_claims):
     fake = FakeOllama([
-        {"content": 'I will check the rules: {"name": "check_policy_rules", "arguments": {}}'},
+        {"content": 'I will check the policy: {"name": "verify_policy", "arguments": {}}'},
+        {"content": 'And the old name: {"name": "check_policy_rules", "arguments": {}}'},
         {"content": "No more tools needed."},
-        decision_json("FLAG_FOR_INVESTIGATION", ("policy_check", "RF01_PH_FAULT_ALL_PERILS fired")),
+        decision_json("FLAG_FOR_INVESTIGATION", ("policy_check", "PV08_COVERAGE_LIMITS is UNKNOWN (1 check)")),
     ])
     try:
         tid, d, trace = ollama_runner(fake).run_claim(sample_claims[1])
@@ -328,8 +427,8 @@ def test_ollama_tool_call_written_as_text_is_recovered(sample_claims):
         fake.close()
     agent_events = [t for t in trace if t["node"] == "agent"]
     assert agent_events[0].get("tool_calls_from_text") is True
-    assert [c["name"] for t in trace if t["node"] == "tools" for c in t["calls"]] == ["check_policy_rules"]
-    assert d.decided_by == "llm" and d.evidence[0].source_tool == "policy_check"
+    assert agent_calls(trace) == ["verify_policy", "verify_policy"]     # old name mapped to the new tool
+    assert d.decided_by == "llm" and d.evidence[0].source_tool == "policy_verification"
 
 
 def test_ollama_malformed_json_retries_then_falls_back(sample_claims):

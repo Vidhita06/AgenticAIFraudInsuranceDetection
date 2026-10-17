@@ -1041,7 +1041,7 @@ class TrainingRun:
             "calibration": f["calibration"],
             "thresholds": f["thresholds"], "risk_bands": f["risk_bands"],
             "decision_policy": {"high": "FLAG_FOR_INVESTIGATION candidate (score >= high band)",
-                                "blocking_validation_failure": "REQUEST_MORE_INFO",
+                                "blocking_validation_failure": "REQUEST_MORE_INFORMATION",
                                 "otherwise": "APPROVE (always subject to adjuster review)"},
             "validation_metrics": ranking_metrics(self.y_val, f["oof_cal"]),
             "evaluation": None if ev is None else {

@@ -164,9 +164,11 @@ def stage_pilot(args, plan: Plan) -> dict:
           f"{meas['input_tokens']:.0f} input / {meas['output_tokens']:.0f} output tokens, "
           f"${meas['cost_usd']:.4f}, {meas['latency_s']:.1f}s")
     for r in recs:
-        tools = r["tools_called"] or "none (auto policy check)"
-        print(f"  {r['claim_id']:>9} label={r['label']} -> {str(r['decision']):<24} ({r['decided_by']}, "
-              f"tools={tools}, removed evidence={r['grounding_removed']}, llm failures={r['llm_failures']})")
+        tools = ",".join(r["tools_called"]) or "none"
+        auto = ",".join(r.get("auto_tools") or []) or "none"
+        print(f"  {r['claim_id']:>9} label={r['label']} -> {str(r['decision']):<26} ({r['decided_by']}, "
+              f"agent tools={tools}; auto={auto}; removed evidence={r['grounding_removed']}, "
+              f"llm failures={r['llm_failures']})")
     fallback = sum(r["decided_by"] == "rule_fallback" for r in recs)
     if fallback:
         print(f"  NOTE: {fallback}/{len(recs)} claims fell back to the rule-based decision "
