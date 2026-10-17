@@ -313,6 +313,10 @@ def stage_final(args, plan: Plan, measured: dict | None = None) -> None:
 
 
 def main() -> None:
+    # Progress must reach a log file as it happens (e.g. under nohup), not only at exit.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("stage", choices=["offline", "estimate", "pilot", "final", "all"])
     ap.add_argument("--split", default="validation", choices=["validation", "test"])
