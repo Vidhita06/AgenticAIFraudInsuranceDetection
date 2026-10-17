@@ -568,7 +568,7 @@ def compare_modes(dfs: Mapping[str, pd.DataFrame], legit_weight: float = 1.0) ->
     changed = j[(j["decision (off)"] != j["decision (on)"]) | (cat_off != cat_on)]
     cause = lambda r: ", ".join([c for c, v in r["policy_checks"].items() if v == "FAIL"]
                                 + ([f"{int(r['history_count'])} simulated prior claims"]
-                                   if pd.notna(r["history_count"]) else [])) or "LLM judgement"
+                                   if pd.notna(r["history_count"]) and r["history_count"] > 0 else [])) or "LLM judgement"
     changed = changed.assign(cause=[cause(r) for _, r in changed.iterrows()])
     changed = changed[["policy_number", "label", "decision (off)", "flag_category (off)", "decision (on)",
                        "flag_category (on)", "cause"]]
