@@ -257,10 +257,28 @@ def model_only_decision(tool_results: Mapping[str, Any]) -> str:
     return model_only(tool_results)[0]
 
 
+def completed_runs(out_path: Path) -> set[tuple[int, int]]:
+    """(policy_number, run_index) of every complete record in a results file. A trailing line
+    cut off by a crash is dropped (the file is rewritten without it) so the run can resume."""
+    if not Path(out_path).exists():
+        return set()
+    good, done = [], set()
+    for line in Path(out_path).read_text(encoding="utf-8").splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        good.append(line)
+        done.add((int(rec["policy_number"]), int(rec["run_index"])))
+    Path(out_path).write_text("".join(l + "\n" for l in good), encoding="utf-8")
+    return done
+
+
 def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_index: int = 0,
               model_name: str = "none", progress: Callable[[str], None] = print,
-              provider: str = "anthropic") -> list[dict]:
-    """Triage every claim (stops at human review) and append one JSON record per claim."""
+              provider: str = "anthropic", skip: Optional[set[tuple[int, int]]] = None) -> list[dict]:
+    """Triage every claim (stops at human review) and append one JSON record per claim.
+    `skip`: (policy_number, run_index) pairs already in the file (resuming an interrupted run)."""
     tracker = UsageTracker()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     price = None
@@ -269,7 +287,10 @@ def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_inde
     except KeyError:
         pass
     records = []
+    skip = skip or set()
     for i, row in enumerate(claims.to_dict("records")):
+        if (int(row.get("PolicyNumber")), int(run_index)) in skip:
+            continue
         label = int(row.pop(TARGET))
         tracker.reset()
         thread = f"{split}-{row.get('PolicyNumber')}-r{run_index}-{uuid.uuid4().hex[:6]}"

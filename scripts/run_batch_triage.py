@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 import pandas as pd
@@ -35,8 +36,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from evaluation.agent_eval import (  # noqa: E402
-    MODES, RESULTS_DIR, UsageTracker, band_stratified_sample, compare_modes, confirm, estimate_cost, judge_rationales, load_results,
-    load_split, manual_review_sample, measured_per_run, pricing, run_batch, stratified_sample, summarize,
+    MODES, RESULTS_DIR, UsageTracker, band_stratified_sample, compare_modes, completed_runs, confirm, estimate_cost,
+    judge_rationales, load_results, load_split, manual_review_sample, measured_per_run, pricing, run_batch, stratified_sample, summarize,
     test_marker, write_report,
 )
 from src.config import load_config  # noqa: E402
@@ -245,6 +246,17 @@ def stage_final(args, plan: Plan, measured: dict | None = None) -> None:
     check_simulated(plan)
     markers = {m: test_marker(plan.model, m) for m in plan.modes}
     done = [m for m, mk in markers.items() if mk.exists()]
+    resume_ts, finished = None, set()
+    if args.resume:
+        started = {m: markers[m].read_text().split() for m in done}
+        stamps = {re.search(r"_(\d{8}_\d{6})\.jsonl$", t[0]).group(1) for t in started.values()}
+        if len(stamps) != 1:
+            sys.exit("--resume: no single interrupted final run found for this model "
+                     f"(markers: {', '.join(m + ': ' + ' '.join(t) for m, t in started.items()) or 'none'}).")
+        resume_ts = stamps.pop()
+        finished = {m for m, t in started.items() if "completed" in t}
+        print(f"Resuming final run {resume_ts}; simulated-data modes already complete: {', '.join(finished) or 'none'}")
+        done = []
     if done and not args.force_test_rerun:
         sys.exit(f"The final test evaluation for {plan.model} (simulated data {', '.join(done)}) already ran "
                  f"({markers[done[0]].read_text().strip()}). The test set is evaluated once per model and mode; "
@@ -257,7 +269,7 @@ def stage_final(args, plan: Plan, measured: dict | None = None) -> None:
     if not confirm(f"FINAL (test set, once per model and mode; simulated data {'/'.join(plan.modes)}): "
                    f"{est.describe(plan.model)}", args.yes, free=est.free):
         sys.exit("Not run.")
-    ts = stamp()
+    ts = resume_ts or stamp()
     n_fraud = int(sample.FraudFound_P.sum())
     rep = sample.sample(min(plan.consistency_claims, len(sample)), random_state=args.seed)
     dfs, judges, outs, judge_cost = {}, {}, {}, 0.0
@@ -267,15 +279,23 @@ def stage_final(args, plan: Plan, measured: dict | None = None) -> None:
         out = RESULTS_DIR / f"final_test_{plan.slug}_sim{mode}_{ts}.jsonl"
         outs[mode] = out.name
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(f"{out.name} started {ts}\n")
-        print(f"Primary run (simulated data {mode}): {len(sample)} test claims ({n_fraud} frauds, "
-              f"{len(sample) - n_fraud} legit) on {plan.model}")
-        run_batch(sample, runner, "test", out, run_index=0, model_name=plan.model, provider=plan.provider)
-        for k in range(1, plan.consistency_runs if plan.consistency_claims else 1):
-            print(f"Consistency run {k + 1}/{plan.consistency_runs} on {len(rep)} claims (simulated data {mode})")
-            run_batch(rep, runner, "test", out, run_index=k, model_name=plan.model, provider=plan.provider)
+        skip = completed_runs(out) if resume_ts else set()
+        if mode not in finished:
+            marker.write_text(f"{out.name} started {ts}\n")
+            print(f"Primary run (simulated data {mode}): {len(sample)} test claims ({n_fraud} frauds, "
+                  f"{len(sample) - n_fraud} legit) on {plan.model}"
+                  + (f"; {sum(r == 0 for _, r in skip)} already done" if skip else ""))
+            run_batch(sample, runner, "test", out, run_index=0, model_name=plan.model, provider=plan.provider,
+                      skip=skip)
+            for k in range(1, plan.consistency_runs if plan.consistency_claims else 1):
+                print(f"Consistency run {k + 1}/{plan.consistency_runs} on {len(rep)} claims (simulated data {mode})")
+                run_batch(rep, runner, "test", out, run_index=k, model_name=plan.model, provider=plan.provider,
+                          skip=skip)
         dfs[mode] = load_results([out])
-        if plan.judge_claims:
+        judge_file = RESULTS_DIR / f"judge_{plan.slug}_sim{mode}_{ts}.csv"
+        if plan.judge_claims and resume_ts and judge_file.exists():
+            judges[mode] = pd.read_csv(judge_file)
+        elif plan.judge_claims:
             tracker = UsageTracker()
             print(f"LLM-as-judge on up to {plan.judge_claims} rationales (simulated data {mode})")
             judges[mode] = judge_rationales(dfs[mode], runner.deps.llm, n=plan.judge_claims, tracker=tracker)
@@ -333,6 +353,8 @@ def main() -> None:
     ap.add_argument("--pause", type=float, default=0.0, help="seconds to wait between claims (free-tier rate limits)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--force-test-rerun", action="store_true")
+    ap.add_argument("--resume", action="store_true",
+                    help="final: continue an interrupted final run (same --sample-size/--seed), skipping finished claims")
     ap.add_argument("--simulated-data", default="both", choices=["off", "on", "both"],
                     help="SIMULATED reference database for Tools 3, 4, 6: off, on, or both side by side")
     args = ap.parse_args()
