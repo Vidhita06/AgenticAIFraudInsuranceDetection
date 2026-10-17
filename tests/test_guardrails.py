@@ -128,8 +128,8 @@ def test_every_flag_has_a_category():
     assert d.flag_category == "POLICY_CONDITION"
     d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools({"ok": False, "error": "x"}))
     assert d.flag_category == "SYSTEM_FAILURE"
-    d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools(LOW))
-    assert d.flag_category == "FRAUD_RISK"                               # the LLM's own risk judgement
+    d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools({**LOW, "risk_indicators": FLAGS}))
+    assert d.flag_category == "FRAUD_RISK"                               # low band, but a warning red flag
     d, _ = apply_guardrails(draft("APPROVE"), "PN-1", tools(LOW))
     assert d.flag_category is None
 
@@ -197,3 +197,24 @@ def test_unavailable_history_cannot_be_cited_as_a_clean_record():
                              "PN-1", tools(LOW, claim_history=hist))
     assert [e.fact for e in d.evidence] == ["Claim history is unavailable for this policy"]
     assert "unavailable" in iv[0]["detail"]
+
+
+PV_UNKNOWN = {"ok": True, "status": "completed", "overall_result": "UNKNOWN", "counts": {"PASS": 3, "FAIL": 0, "UNKNOWN": 6},
+              "failed_checks": [], "claim_record_failures": [], "policy_condition_failures": [],
+              "unknown_checks": ["PV01_POLICY_IDENTIFIED", "PV08_COVERAGE_LIMITS"], "checks": []}
+HIST_UNAVAILABLE = {"ok": True, "status": "unavailable", "history_available": False, "previous_claim_count": None}
+SIM_NONE = {"ok": True, "k": 5, "neighbour_frauds": 0, "neighbour_fraud_rate": 0.0, "historical_base_rate": 0.0599,
+            "neighbours": []}
+
+
+def test_fraud_flag_resting_only_on_data_gaps_is_replaced():
+    """The pilot case: low band, and the only "concerns" are systemic gaps of the data source."""
+    tr = tools(LOW, policy_verification=PV_UNKNOWN, claim_history=HIST_UNAVAILABLE, similar_claims=SIM_NONE)
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tr)
+    assert d.decision == "APPROVE" and d.flag_category is None
+    assert [i["guardrail"] for i in iv] == ["unsupported_fraud_flag"]
+    assert "POLICY_TERMS_UNVERIFIED" in iv[0]["detail"] and "unsupported_fraud_flag" in d.guardrail_notes[0]
+    # a real risk signal keeps the flag
+    for score in (HIGH, {**LOW, "risk_band": "medium"}, {**LOW, "risk_indicators": FLAGS}):
+        d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**tr, "fraud_score": score})
+        assert d.decision == "FLAG_FOR_INVESTIGATION" and not iv

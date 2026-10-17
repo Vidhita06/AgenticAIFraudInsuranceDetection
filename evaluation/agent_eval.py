@@ -67,6 +67,34 @@ def stratified_sample(df: pd.DataFrame, legit_per_fraud: float = 1.0, n: int | N
     return out
 
 
+def band_stratified_sample(df: pd.DataFrame, n: int, seed: int = 42) -> pd.DataFrame:
+    """n claims spread evenly over the model's risk bands (low / medium / high; the remainder
+    goes to medium, then high), each band half fraud / half legit where possible. Used for the
+    pilot, so the agent is tried on medium-band claims too, not only on clear-cut ones."""
+    from src.ml.predict import load_artifacts, predict_proba, risk_band
+    art = load_artifacts()
+    claims = df.drop(columns=[TARGET])
+    bands = pd.Series([risk_band(p, art.bands) for p in predict_proba(claims, art)], index=df.index)
+    order = ["low", "medium", "high"]
+    quota = {b: n // 3 for b in order}
+    for b in ["medium", "high", "low"][: n % 3]:
+        quota[b] += 1
+    parts = []
+    for b in order:
+        pool = df[bands == b]
+        fraud, legit = pool[pool[TARGET] == 1], pool[pool[TARGET] == 0]
+        nf = min(len(fraud), (quota[b] + 1) // 2)
+        nl = min(len(legit), quota[b] - nf)
+        nf = min(len(fraud), quota[b] - nl)                 # top up with frauds if legit ran out
+        parts += [fraud.sample(nf, random_state=seed), legit.sample(nl, random_state=seed)]
+    out = pd.concat(parts).sample(frac=1, random_state=seed)
+    out.attrs["bands"] = bands.loc[out.index].value_counts().reindex(order, fill_value=0).to_dict()
+    out.attrs["band_of"] = {int(pn): bands.loc[i] for i, pn in out["PolicyNumber"].items()}
+    out = out.reset_index(drop=True)
+    out.attrs["legit_weight"] = 1.0
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Cost estimation
 # ---------------------------------------------------------------------------

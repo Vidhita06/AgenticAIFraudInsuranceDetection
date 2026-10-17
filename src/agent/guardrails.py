@@ -13,6 +13,10 @@
    condition FAIL -> FLAG (POLICY_CONDITION).
 4b. Every FLAG carries a category: FRAUD_RISK, POLICY_CONDITION or SYSTEM_FAILURE. Only
    FRAUD_RISK flags count as fraud caught in the evaluation.
+4c. A FRAUD_RISK flag needs a risk signal. If every reason code is a low-risk or systemic one
+   (LOW_RISK_REASON_CODES: low band, unverifiable policy terms, unavailable history, no fraud
+   among similar claims, simulated data), the flag rests only on known data-source gaps and
+   is replaced by the rule-based decision (`unsupported_fraud_flag`).
 5. Every evidence fact must be traceable to the output of the tool it cites; untraceable
    facts are removed and logged. A tool that reported `unavailable` can only be cited for
    that limitation (so missing history is never presented as a clean history).
@@ -33,6 +37,10 @@ from src.agent.evidence import (SIMULATED, aggregate_evidence, claim_level_groun
                                 pv_failures, reason_codes, uses_simulated)
 from src.schemas.decision import ALLOWED_DECISIONS, DecisionDraft, Evidence, TriageDecision, normalize_decision
 
+# Reason codes that are no risk signal on their own: a low score, or gaps of the data source that
+# apply to every claim (no policy document, no linked history), or simulated data.
+LOW_RISK_REASON_CODES = frozenset({"LOW_MODEL_RISK", "POLICY_TERMS_UNVERIFIED", "CLAIM_HISTORY_UNAVAILABLE",
+                                   "SIMILAR_CLAIMS_NO_FRAUD", "SIMULATED_DATA_USED", "NO_MATERIAL_CONCERNS"})
 _NUM = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(%?)")
 _MISSING_WORDS = re.compile(r"unavailable|not available|no (?:authori[sz]ed|linked)|cannot|could not|unknown|"
                             r"not (?:configured|recorded|on file)|missing", re.I)
@@ -237,6 +245,14 @@ def apply_guardrails(draft: DecisionDraft | None, claim_id: str, tool_results: M
         decision, category = "FLAG_FOR_INVESTIGATION", "SYSTEM_FAILURE"
     if decision == "FLAG_FOR_INVESTIGATION" and category is None:
         category = flag_category(tool_results, required)
+    if decision == "FLAG_FOR_INVESTIGATION" and category == "FRAUD_RISK":
+        codes = set(reason_codes(decision, record, tool_results))
+        if codes <= LOW_RISK_REASON_CODES:
+            fb = rule_based_decision(claim_id, tool_results, "fraud flag without a risk signal", required)
+            interventions.append({"guardrail": "unsupported_fraud_flag",
+                                  "detail": f"FLAG_FOR_INVESTIGATION -> {fb.decision} (reason codes only "
+                                            f"{', '.join(sorted(codes))})"})
+            decision, category = fb.decision, fb.flag_category
     if decision != "FLAG_FOR_INVESTIGATION":
         category = None
 
@@ -251,7 +267,8 @@ def apply_guardrails(draft: DecisionDraft | None, claim_id: str, tool_results: M
 
     notes = [f"{i['guardrail']}: {i['detail']}" for i in interventions]
     adjusting = ("blocking_validation", "request_info_not_claim_level", "high_risk_not_approve", "approve_needs_score",
-                 "approve_needs_consistent_claim", "approve_needs_policy_pass", "approve_needs_tools")
+                 "approve_needs_consistent_claim", "approve_needs_policy_pass", "approve_needs_tools",
+                 "unsupported_fraud_flag")
     rationale = draft.rationale
     if any(i["guardrail"] in adjusting for i in interventions):
         rationale += " [Decision adjusted by guardrails: " + "; ".join(

@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from evaluation.agent_eval import (  # noqa: E402
-    MODES, RESULTS_DIR, UsageTracker, compare_modes, confirm, estimate_cost, judge_rationales, load_results,
+    MODES, RESULTS_DIR, UsageTracker, band_stratified_sample, compare_modes, confirm, estimate_cost, judge_rationales, load_results,
     load_split, manual_review_sample, measured_per_run, pricing, run_batch, stratified_sample, summarize,
     test_marker, write_report,
 )
@@ -178,7 +178,7 @@ def stage_offline(args, plan: Plan) -> None:
 
 def stage_estimate(args, plan: Plan) -> None:
     ev = load_config()["evaluation"]
-    pilot = stratified_sample(load_split("validation"), n=args.n or ev["pilot_claims"], seed=args.seed)
+    pilot = band_stratified_sample(load_split("validation"), n=args.n or ev["pilot_claims"], seed=args.seed)
     print(f"provider={plan.provider} model={plan.model}")
     print("PILOT  ", estimate_cost(pilot, plan.model, len(pilot), provider=plan.provider).describe(plan.model))
     measured = latest_pilot(plan)
@@ -191,7 +191,10 @@ def stage_estimate(args, plan: Plan) -> None:
 def stage_pilot(args, plan: Plan) -> dict:
     check_simulated(plan)
     n = args.n or load_config()["evaluation"]["pilot_claims"]
-    sample = stratified_sample(load_split("validation"), n=n, seed=args.seed)
+    sample = band_stratified_sample(load_split("validation"), n=n, seed=args.seed)
+    band_of = sample.attrs["band_of"]
+    print(f"Pilot sample: {n} validation claims by risk band {sample.attrs['bands']}, "
+          f"{int(sample.FraudFound_P.sum())} frauds")
     est = estimate_cost(sample, plan.model, len(sample) * len(plan.modes), provider=plan.provider)
     if args.max_cost and est.usd > args.max_cost:
         sys.exit(f"Estimate ${est.usd:.2f} exceeds --max-cost {args.max_cost}")
@@ -206,13 +209,20 @@ def stage_pilot(args, plan: Plan) -> dict:
         recs = run_batch(sample, runners[mode], "validation", out, model_name=plan.model, provider=plan.provider)
         all_recs += recs
         dfs[mode] = load_results([out])
+        agree = 0
         for r in recs:
             tools = ",".join(r["tools_called"]) or "none"
             auto = ",".join(r.get("auto_tools") or []) or "none"
             cat = f"/{r['flag_category']}" if r.get("flag_category") else ""
-            print(f"  {r['claim_id']:>9} label={r['label']} -> {str(r['decision']) + cat:<42} ({r['decided_by']}, "
-                  f"agent tools={tools}; auto={auto}; removed evidence={r['grounding_removed']}, "
+            same = r["decision"] == r["model_only_decision"]
+            agree += same
+            guard = [i for i in r.get("interventions", []) if i not in ("evidence_grounding",)]
+            print(f"  {r['claim_id']:>9} label={r['label']} band={band_of.get(r['policy_number'], '?'):<6} "
+                  f"-> {str(r['decision']) + cat:<42} model-only={r['model_only_decision']:<24} "
+                  f"{'=' if same else '≠'}  ({r['decided_by']}; agent tools={tools}; auto={auto}; "
+                  f"guardrails={','.join(guard) or 'none'}; removed evidence={r['grounding_removed']}; "
                   f"llm failures={r['llm_failures']})")
+        print(f"  Agreement with model_only_decision (simulated data {mode}): {agree}/{len(recs)}")
     meas = measured_per_run(all_recs) or {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
                                            "latency_s": sum(r["latency_s"] for r in all_recs) / max(len(all_recs), 1)}
     print(f"\nPilot done: {len(all_recs)} runs, ${sum(r['cost_usd'] for r in all_recs):.4f} spent; per run: "

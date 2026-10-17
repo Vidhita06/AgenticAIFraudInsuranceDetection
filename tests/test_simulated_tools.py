@@ -95,3 +95,35 @@ def test_graph_with_simulated_data_writes_runtime_tables(sample_claims, simulate
     assert d2.simulated_data is False and "SIMULATED_DATA_USED" not in d2.reason_codes
     assert "runtime_tables" not in [t for t in trace2 if t["node"] == "guardrails"][0]
     assert con.execute("SELECT COUNT(*) FROM investigation_audit").fetchone()[0] == before + 1
+
+
+@needs_models
+def test_pn_5736_low_band_with_data_gaps_is_approved(vector_store):
+    """Pilot regression (qwen2.5:72b, simulated data OFF): PN-5736 (legit, p ~ 0.009) was flagged
+    FRAUD_RISK only because no policy document exists. The guardrail restores APPROVE."""
+    import json as _json
+
+    import pandas as pd
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage
+    from src.agent.nodes import NodeDeps
+    from src.agent.runner import TriageRunner
+
+    class Scripted(GenericFakeChatModel):
+        def bind_tools(self, tools, **kw):
+            return self
+
+    v = pd.read_csv(path_for("real_validation"))
+    claim = v[v.PolicyNumber == 5736].iloc[0].drop("FraudFound_P").to_dict()
+    flag = AIMessage(content=_json.dumps({
+        "decision": "FLAG_FOR_INVESTIGATION",
+        "rationale": "Despite the low fraud score, the lack of a policy document is a critical limitation "
+                     "that warrants further investigation.",
+        "evidence": [{"source_tool": "policy_retrieval", "fact": "Policy document not available"}]}))
+    llm = Scripted(messages=iter([AIMessage(content="Evidence gathered."), flag]))
+    tid, d, trace = TriageRunner(deps=NodeDeps(llm=llm, simulated=False)).run_claim(claim)
+    assert d.risk_band == "low" and d.simulated_data is False
+    assert set(d.reason_codes) <= {"LOW_MODEL_RISK", "POLICY_TERMS_UNVERIFIED", "CLAIM_HISTORY_UNAVAILABLE",
+                                   "SIMILAR_CLAIMS_NO_FRAUD", "NO_MATERIAL_CONCERNS"}
+    assert d.decision == "APPROVE" and d.flag_category is None and d.decided_by == "llm"
+    assert any(n.startswith("unsupported_fraud_flag") for n in d.guardrail_notes)

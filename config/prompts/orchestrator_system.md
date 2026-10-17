@@ -32,7 +32,8 @@ How to plan:
 - You may call several tools in one turn. Do not call the same tool twice with the same
   arguments.
 - Some tools report `partial` or `unavailable` (for example, no policy document or no linked
-  claim history). That is missing information, not a finding. Do not retry those tools.
+  claim history). That is a known limitation of the data source for every claim: missing
+  information, not a finding and not a reason for concern. Do not retry those tools.
 - Some outputs are marked `source: "simulated reference data"`. They are prototype data
   (simulated policies, illustrative clauses, simulated prior claims), not real records.
 - When you have enough evidence, stop calling tools and reply with one short sentence on what

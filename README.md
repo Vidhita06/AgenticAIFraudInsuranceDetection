@@ -232,6 +232,11 @@ With `enabled: false` (the default) the tools behave exactly as without it.
   - `POLICY_CONDITION`: a coverage problem, such as a missed reporting deadline;
   - `SYSTEM_FAILURE`: the fraud score or a required tool failed.
 - The evaluation counts only FRAUD_RISK flags as fraud caught.
+- **Systemic gaps never justify a flag.** These hold for every claim: no policy document, UNKNOWN
+  policy checks, no linked history and no claim amount.
+  - If a FRAUD_RISK flag's reason codes are all low-risk or systemic ones, the guardrail
+    replaces it with the rule-based decision (`unsupported_fraud_flag`).
+  - The synthesis prompt gives a worked example of such a claim being approved.
 
 Without an API key the agent still runs and returns the rule-based decision.
 `pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and

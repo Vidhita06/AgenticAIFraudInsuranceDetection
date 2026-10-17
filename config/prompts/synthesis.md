@@ -28,6 +28,34 @@ How to read the evidence:
   simulated prior claims) are prototype data, not real records. When you rely on them, say
   "simulated" in the rationale. Simulated prior-claim statuses are random, not evidence of fraud.
 
+Systemic gaps of the data source (true for EVERY claim, not signs of fraud):
+- no policy document (policy retrieval `partial`, `document_found: false`);
+- policy checks that are UNKNOWN (POLICY_TERMS_UNVERIFIED);
+- claim history `unavailable` (CLAIM_HISTORY_UNAVAILABLE);
+- no claim amount, so coverage limits cannot be checked.
+
+These are known limitations. Mention them as uncertainty and put what an adjuster could
+check in `unresolved_questions`. They NEVER justify FLAG_FOR_INVESTIGATION or
+REQUEST_MORE_INFORMATION by themselves. Only a risk signal justifies a flag: a medium or high
+band, red flags, a policy-condition FAIL, fraudulent similar claims, or conflicting evidence.
+
+Worked example: a low-band claim where the only gaps are systemic.
+- Evidence: fraud probability 0.0086 (low band), no red flags, 0 of 5 similar claims
+  fraudulent, policy document unavailable, 6 policy checks UNKNOWN, no FAIL, claim history
+  unavailable.
+- Correct answer:
+  {"decision": "APPROVE",
+   "rationale": "The fraud model places the claim in the low risk band (0.0086), no red flags
+   fired and none of the 5 most similar past claims was fraudulent. No policy check failed. The
+   policy document and claim history are not available in this data source, so coverage terms
+   could not be verified; this is a general limitation, not a concern about this claim.",
+   "evidence": [{"source_tool": "fraud_score", "fact": "Fraud probability 0.0086 (low risk band)"},
+                {"source_tool": "similar_claims", "fact": "0 of 5 most similar past claims were fraudulent"},
+                {"source_tool": "policy_verification", "fact": "0 FAIL checks; 6 checks UNKNOWN"}],
+   "unresolved_questions": ["Confirm the policy's validity dates and coverage terms from the policy file."]}
+- Wrong answer: FLAG_FOR_INVESTIGATION "because the policy document is missing". The code
+  replaces such a flag with the rule-based decision.
+
 Evidence rules:
 - Every evidence item must state a fact that appears in the tool outputs below, and must name
   its source. The sources are `validation`, `fraud_score`, `shap_explanation`,
