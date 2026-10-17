@@ -206,11 +206,42 @@ How a claim flows through the graph (`docs/architecture.png`):
 - `PolicyNumber` is unique per claim, so there is no linked claim history. Tool 6 reports
   `unavailable` unless `claim_history.source` names an authorised file.
 
+**Simulated reference data (optional, clearly labelled).** `python scripts/build_simulated_db.py`
+builds `data/simulated/insurance.db` (see `docs/simulated_data_plan.md`). It has four parts:
+
+- simulated policies, from the claims' real policy fields plus simulated dates and limits;
+- illustrative clauses written by the team (`config/simulated_policy_clauses.yaml`);
+- simulated prior claims, with counts that follow `PastNumberOfClaims` and no outcomes;
+- run-time tables, where the agent records its verification results and an audit row.
+
+The generator never reads the fraud label, and tests prove it. With `simulated_data.enabled: true`
+(or `NodeDeps(simulated=True)`), Tools 3, 4 and 6 use the database:
+
+- every output from it says `source: "simulated reference data"`;
+- evidence cited from it is labelled the same way in the recommendation;
+- Tool 4 checks the clauses for real PASS/FAIL results.
+
+With `enabled: false` (the default) the tools behave exactly as without it.
+
+**Decisions and flag categories:**
+
+- REQUEST_MORE_INFORMATION is only for claim-level problems: blocking validation, or a claim
+  record that contradicts itself (PV02, PV04).
+- Every FLAG_FOR_INVESTIGATION carries a category:
+  - `FRAUD_RISK`: fraud risk;
+  - `POLICY_CONDITION`: a coverage problem, such as a missed reporting deadline;
+  - `SYSTEM_FAILURE`: the fraud score or a required tool failed.
+- The evaluation counts only FRAUD_RISK flags as fraud caught.
+
 Without an API key the agent still runs and returns the rule-based decision.
 `pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and
 no network.
 
 ## Agent evaluation (Step D)
+
+Every stage takes `--simulated-data off|on|both` (default `both`). `both` runs the same claims
+without and with the simulated reference database, and `docs/report/03_agent_evaluation.md`
+shows the two side by side. Build the database first with `python scripts/build_simulated_db.py`.
 
 The live evaluation is one command, `scripts/run_batch_triage.py all`:
 

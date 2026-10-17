@@ -83,12 +83,52 @@ def _rel(path: Path) -> str:
     return str(path.relative_to(PROJECT_ROOT)) if path.is_relative_to(PROJECT_ROOT) else str(path)
 
 
+def simulated_policy(record: Mapping[str, Any], claim_id: str) -> Optional[dict[str, Any]]:
+    """Policy record and clauses from the SIMULATED reference database, or None if the
+    database has no policy for this claim."""
+    from src.simulated import DATA_ORIGIN
+    from src.simulated.db import get_db
+    db = get_db()
+    pol = db.policy(record.get("PolicyNumber"))
+    if pol is None:
+        return None
+    clauses = db.clauses(pol["base_policy"])
+    by_cat = lambda cat: [{k: c[k] for k in ("clause_id", "title", "wording")} for c in clauses if c["category"] == cat]
+    limits = {k.removeprefix("limit_"): v for k, v in pol.items() if k.startswith("limit_") and v is not None}
+    pol_view = {k: v for k, v in pol.items() if k != "data_origin" and not k.startswith("limit_")}
+    return {
+        "claim_id": claim_id, "policy_id": pol["policy_id"], "status": "found", "document_found": True,
+        "source": DATA_ORIGIN, "wording_note": clauses[0]["wording_note"] if clauses else None,
+        "accident_period": f"{record.get('Month')} {record.get('Year')}, week {record.get('WeekOfMonth')}",
+        "recorded_policy_attributes": {f: record.get(f) for f in RECORDED_FIELDS},
+        "simulated_policy": pol_view,
+        "applicable_version": {"version": f"simulated term {pol['term_start']} to {pol['term_end']}",
+                               "selected_because": "the current annual term containing the derived accident date",
+                               "effective_from": pol["term_start"], "effective_to": pol["term_end"]},
+        "document": {"coverage": by_cat("coverage"), "conditions": by_cat("condition"),
+                     "exclusions": by_cat("exclusion"), "reporting_requirements": by_cat("reporting"),
+                     "limits": limits, "limit_clauses": by_cat("limit"), "deductible": pol["deductible"]},
+        "missing_information": ["claim amount: not recorded, so the coverage limits cannot be checked"],
+        "source_references": [
+            {"source": "claim record", "fields": RECORDED_FIELDS, "note": "real policy attributes on the claim"},
+            {"source": DATA_ORIGIN, "tables": ["policies", "policy_rules"],
+             "note": "simulated dates and limits; illustrative clause wording written by the project team"}],
+    }
+
+
 @safe_tool
-def retrieve_policy(claim: Mapping[str, Any], store: Optional[str | Path] = None) -> dict[str, Any]:
+def retrieve_policy(claim: Mapping[str, Any], store: Optional[str | Path] = None,
+                    simulated: Optional[bool] = None) -> dict[str, Any]:
     """Return the matching policy record, the applicable version, coverage, conditions and
-    clauses (when a document exists), source references and the missing categories."""
+    clauses (when a document exists), source references and the missing categories.
+    With simulated data enabled, the policy comes from the SIMULATED reference database."""
+    from src.simulated.db import enabled
     n = require_valid_claim(claim)
     record = n.claim.to_record()
+    if enabled(simulated):
+        sim = simulated_policy(record, n.claim_id)
+        if sim is not None:
+            return jsonable(sim)
     pn = record.get("PolicyNumber")
     when = accident_month(record)
     doc, where = load_policy_document(pn, Path(store) if store else None)

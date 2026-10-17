@@ -1,0 +1,12 @@
+check_id,level,category,rule,claims,PASS,FAIL,UNKNOWN,FAIL %,fraud % among FAIL
+PV01_POLICY_IDENTIFIED,policy_condition,applicability,An applicable policy record exists.,2313,2313,0,0,0.0,
+PV02_POLICY_TYPE_CONSISTENT,claim_record,applicability,V05_POLICYTYPE_CONSISTENT,2313,2313,0,0,0.0,
+PV04_CLAIM_TIMELINE,claim_record,reporting,"V06_CLAIM_AFTER_ACCIDENT, V09_POLICY_DAYS_ORDER, V10_POLICY_DAYS_VS_LAG",2313,2310,3,0,0.13,33.3
+SIM-ALL-01,policy_condition,condition,Incident within the policy term,2313,2313,0,0,0.0,
+SIM-ALL-02,policy_condition,condition,Insured vehicle,2313,2313,0,0,0.0,
+SIM-ALL-03,policy_condition,limit,Deductible,2313,2313,0,0,0.0,
+SIM-ALL-04,policy_condition,reporting,Reporting deadline,2313,2259,54,0,2.33,11.1
+SIM-ALL-05,policy_condition,limit,Limits of cover,2313,0,0,2313,0.0,
+SIM-AP-02,policy_condition,exclusion,Wear and mechanical failure,677,0,0,677,0.0,
+SIM-COL-02,policy_condition,condition,Driver age recorded,1568,1546,22,0,1.4,22.7
+SIM-LIA-02,policy_condition,exclusion,Own vehicle damage,745,0,0,745,0.0,

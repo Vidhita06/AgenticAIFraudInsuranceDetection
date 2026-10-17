@@ -55,8 +55,15 @@ class NodeDeps:
     synth_llm: Any = None                            # optional JSON-mode model for synthesis
     # Run by complete_investigation if the agent did not call them (cheap, local, deterministic).
     required_tools: tuple[str, ...] = field(default_factory=lambda: tuple(
-        load_config()["agent"].get("required_tools",
-                                   ["fraud_score", "shap_explanation", "policy_retrieval", "policy_verification"])))
+        load_config()["agent"].get("required_tools", ["fraud_score", "shap_explanation", "policy_retrieval",
+                                                      "policy_verification", "similar_claims"])))
+    # SIMULATED reference data for Tools 3, 4 and 6: None = config (simulated_data.enabled).
+    simulated: Optional[bool] = None
+
+    @property
+    def simulated_enabled(self) -> bool:
+        from src.simulated.db import enabled
+        return enabled(self.simulated)
 
     def run_source(self, source: str, claim: dict, args: dict, results: dict) -> dict:
         """Run one evidence source with its arguments and the results it depends on."""
@@ -64,14 +71,15 @@ class NodeDeps:
             return self.scorer(claim)
         if source == "shap_explanation":
             return self.explainer(claim, int(args.get("top_k", 5)), fraud_score=results.get("fraud_score"))
+        sim = {"simulated": self.simulated_enabled}
         if source == "policy_retrieval":
-            return self.policy_retriever(claim)
+            return self.policy_retriever(claim, **sim)
         if source == "policy_verification":
-            return self.policy_verifier(claim, policy=results.get("policy_retrieval"))
+            return self.policy_verifier(claim, policy=results.get("policy_retrieval"), **sim)
         if source == "similar_claims":
             return self.similar(claim, int(args.get("k", 5)), bool(args.get("same_base_policy", False)))
         if source == "claim_history":
-            return self.history(claim, int(args.get("years", 5)))
+            return self.history(claim, int(args.get("years", 5)), **sim)
         return {"ok": False, "error": f"unknown evidence source {source}"}
 
 
@@ -168,6 +176,28 @@ def text_tool_calls(text: str) -> list[dict[str, Any]]:
             calls.append({"name": name, "args": args if isinstance(args, dict) else {},
                           "id": f"text_call_{len(calls)}", "type": "tool_call"})
     return calls
+
+
+def _write_runtime_tables(state, decision) -> str:
+    """Record the real verification checks and the recommendation in the simulated database's
+    run-time tables (verification_results, investigation_audit). Never fails the run."""
+    from src.simulated.db import get_db, settings
+    if not settings().get("write_runtime_tables", True):
+        return "disabled"
+    try:
+        db = get_db()
+        pv = (state.get("tool_results") or {}).get("policy_verification") or {}
+        inv = state.get("investigation_id") or ""
+        if pv.get("ok"):
+            db.write_verification(inv, state["claim_id"], pv.get("checks", []))
+        db.write_audit({"investigation_id": inv, "claim_id": state["claim_id"], "decision": decision.decision,
+                        "flag_category": decision.flag_category, "decided_by": decision.decided_by,
+                        "reason_codes": decision.reason_codes,
+                        "tool_statuses": {k: v.status for k, v in decision.tool_statuses.items()},
+                        "simulated_data": True, "model_version": decision.model_version})
+        return "written"
+    except Exception as e:  # noqa: BLE001
+        return f"failed: {type(e).__name__}: {str(e)[:200]}"
 
 
 def make_nodes(deps: NodeDeps) -> dict[str, Callable]:
@@ -339,13 +369,17 @@ def make_nodes(deps: NodeDeps) -> dict[str, Callable]:
         reason = ("no LLM configured" if deps.llm is None else
                   f"LLM failed or returned invalid output twice ({state.get('llm_error', '')[:200]})")
         decision, interventions = apply_guardrails(draft, state["claim_id"], state["tool_results"],
-                                                   fallback_reason=reason, record=state.get("evidence_record"))
+                                                   fallback_reason=reason, record=state.get("evidence_record"),
+                                                   required=deps.required_tools,
+                                                   simulated_data=deps.simulated_enabled)
         if state.get("max_steps_reached"):
             decision.guardrail_notes.append(f"max_steps: agent stopped after {deps.max_steps} steps")
             interventions.append({"guardrail": "max_steps", "detail": f"{deps.max_steps} steps"})
+        written = _write_runtime_tables(state, decision) if deps.simulated_enabled else None
         return {"decision": decision.model_dump(),
-                "trace": _event("guardrails", decision=decision.decision, decided_by=decision.decided_by,
-                                interventions=interventions)}
+                "trace": _event("guardrails", decision=decision.decision, flag_category=decision.flag_category,
+                                decided_by=decision.decided_by, interventions=interventions,
+                                **({"runtime_tables": written} if written else {}))}
 
     def human_review(state):
         answer = interrupt({"claim_id": state["claim_id"], "recommendation": state["decision"],

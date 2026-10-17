@@ -1,0 +1,33 @@
+{
+  "data_origin": "simulated reference data",
+  "seed": 42,
+  "generator_version": 1,
+  "input_columns": [
+    "PolicyNumber",
+    "BasePolicy",
+    "VehicleCategory",
+    "Deductible",
+    "AgentType",
+    "VehiclePrice",
+    "Year",
+    "Month",
+    "WeekOfMonth",
+    "DayOfWeek",
+    "MonthClaimed",
+    "WeekOfMonthClaimed",
+    "DayOfWeekClaimed",
+    "Days_Policy_Accident",
+    "Days_Policy_Claim",
+    "PastNumberOfClaims"
+  ],
+  "rows": {
+    "policies": 15419,
+    "policy_rules": 22,
+    "claim_history": 32060
+  },
+  "sha256": {
+    "policies": "7bee382232067d5a574bf544ffd16991549a0abef9e8fa76fd472caa151db3b3",
+    "policy_rules": "0baa934376acc9c92b957b0793b86eb403cc5f23e6e3dc8c6f7c66efe94e1a70",
+    "claim_history": "5290f494487a61ae4184544481b20211dc5237c0815020f4114f57e52a6d0a68"
+  }
+}

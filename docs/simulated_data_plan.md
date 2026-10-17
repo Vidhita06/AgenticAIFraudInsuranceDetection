@@ -1,6 +1,7 @@
 # Simulated reference database: implementation plan
 
-**Status: proposal, awaiting team approval. Nothing below is built yet.**
+**Status: implemented** (approved with changes: flag categories, a clause-failure check before
+finishing). Results are in §8.
 
 The team decided to give Tools 3 (policy retrieval), 4 (policy verification) and 6 (claim
 history) a **clearly labelled simulated** data source. This plan says how to build it, how the
@@ -65,8 +66,9 @@ Each clause has an id, a coverage type, a category (`condition`, `exclusion`, `r
 
 - **All coverages:**
   - incident inside the current term (dates);
-  - claim reported within the deadline, measured from the derived dates (Collision and All
-    Perils 30 days, Liability 60 days; illustrative values);
+  - claim reported within the deadline, measured from the derived dates (60 days for every
+    coverage after the measurement in §8; the first draft had 30 days for Collision and All
+    Perils);
   - claim deductible equals the policy deductible. This always PASSes by construction, which
     the output says;
   - insured vehicle category equals the claim's `VehicleCategory`;
@@ -123,8 +125,8 @@ the evaluation can override it per run.
      code `TOOL_FAILURE`, never REQUEST_MORE_INFORMATION.
    - A clause FAIL from the simulated policy (outside the term, late reporting, exclusion) is
      a coverage concern. It blocks APPROVE, and the fallback is FLAG_FOR_INVESTIGATION.
-   - **Team: please confirm FLAG for these two cases**; the only alternative within the three
-     labels is APPROVE, which the guardrails forbid.
+   - Confirmed by the team, with a reason category on every flag (§7): SYSTEM_FAILURE for
+     tool failures, POLICY_CONDITION for clause FAILs.
 2. **`similar_claims` becomes required:** `agent.required_tools` gains `similar_claims`, so
    `complete_investigation` runs it if the agent skips it.
 
@@ -159,7 +161,61 @@ the evaluation can override it per run.
     `scripts/run_batch_triage.py`;
   - notebook 03, the README and `docs/agent_restructure_plan.md`.
 
-## 7. For the B200 pilot
+## 7. Flag categories (added at approval)
+
+- Every FLAG_FOR_INVESTIGATION carries `flag_category`:
+  - `FRAUD_RISK`: high band, or the LLM's flag backed by fraud evidence (medium band, red
+    flags, or elevated similar-claim fraud);
+  - `POLICY_CONDITION`: a policy-condition FAIL (e.g. the reporting deadline) without fraud
+    evidence;
+  - `SYSTEM_FAILURE`: no fraud score, or a required tool failed.
+- Who sets it: guardrail conversions and the rule-based fallback set it explicitly; for an
+  LLM's own flag, code derives it from the evidence (`src/agent/evidence.py: flag_category`).
+- In the evaluation, fraud recall and precision count FRAUD_RISK flags only. POLICY_CONDITION
+  and SYSTEM_FAILURE flags are separate counts, also split by label.
+
+## 8. Clause failure rates (measured before finishing)
+
+Measured on the 2,313 real validation claims (`scripts/simulated_clause_report.py`, written to
+`docs/report/tables/03_simulated_clause_results.csv`).
+
+**The first draft's 30-day reporting deadline exceeded the ~5% bar.** These are the shares of
+validation claims reported more than N days after the accident:
+
+| Coverage | > 30 days | > 60 days | > 90 days |
+|---|---|---|---|
+| Liability (745) | 2.6% | 1.3% | 0.8% |
+| Collision (891) | **5.3%** | 2.2% | 1.5% |
+| All Perils (677) | **7.8%** | 3.5% | 2.4% |
+| All (2,313) | **5.1%** | 2.3% | 1.5% |
+
+The lag is measured conservatively. The data records only the week and weekday of the accident
+and of the claim, so a day-level reading puts the claim before the accident for 305 validation
+claims (13%), all of them in the same week. The tool therefore uses the smallest lag both weeks
+allow, floored at 0. Rule V06, which works at week level, flags only 2 of those 305.
+
+**Fix adopted:** a 60-day deadline for every coverage (one line in
+`config/simulated_policy_clauses.yaml`).
+
+**Result, simulated data on, validation:**
+
+| Check | Level | FAIL | FAIL % | UNKNOWN |
+|---|---|---|---|---|
+| PV04_CLAIM_TIMELINE (claim record) | claim_record | 3 | 0.13% | 0 |
+| SIM-ALL-04 reporting deadline (60 d) | policy_condition | 54 | 2.33% | 0 |
+| SIM-COL-02 driver age recorded (Collision, All Perils) | policy_condition | 22 | 1.40% | 0 |
+| SIM-ALL-01 term, SIM-ALL-02 vehicle, SIM-ALL-03 deductible | policy_condition | 0 | 0% | 0 |
+| SIM-ALL-05 limits, SIM-LIA-02 own damage, SIM-AP-02 wear | policy_condition | 0 | 0% | all |
+
+No clause fails on more than 5% of claims. Notes:
+
+- SIM-ALL-01/02/03 cannot fail on these claims. The simulated policies are built from the
+  claims' own fields, so these checks only catch claims that were edited or don't match their
+  policy record.
+- The 22 SIM-COL-02 failures are claims with Age = 0, which validation already blocks (V03 →
+  REQUEST_MORE_INFORMATION).
+
+## 9. For the B200 pilot
 
 After this lands, run `python scripts/build_simulated_db.py` once (seconds), then
 `run_batch_triage.py pilot --simulated-data both`.

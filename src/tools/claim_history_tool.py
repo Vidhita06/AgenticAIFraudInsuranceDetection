@@ -36,13 +36,44 @@ def _load(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, dtype=str)
 
 
+def simulated_history(record: Mapping[str, Any], claim_id: str, years: Optional[int]) -> Optional[dict[str, Any]]:
+    from src.simulated import DATA_ORIGIN
+    from src.simulated.dates import accident_date
+    from src.simulated.db import get_db
+    db = get_db()
+    pol = db.policy(record.get("PolicyNumber"))
+    if pol is None:
+        return None
+    acc = accident_date(record)
+    lo = (acc - timedelta(days=int(365.25 * int(years)))).isoformat() if (years and acc) else None
+    rows = db.history(pol["customer_id"], lo, acc.isoformat() if acc else None)
+    prior = [{k: r[k] for k in ("prior_claim_id", "claim_date", "incident_type", "status")} for r in rows]
+    return {"claim_id": claim_id, "entity": {"customer_id": pol["customer_id"], "policy_id": pol["policy_id"]},
+            "status": "completed", "history_available": True, "source": DATA_ORIGIN, "data_source": DATA_ORIGIN,
+            "previous_claim_count": len(prior), "previous_claims": prior,
+            "window": {"from": lo, "to": acc.isoformat() if acc else None, "years": years},
+            "recorded_summary": {"fields": {f: record.get(f) for f in SUMMARY_FIELDS},
+                                 "note": "Summary fields recorded on this claim (real data)."},
+            "note": ("Simulated prior claims: their number follows the claim's real PastNumberOfClaims field; dates, "
+                     "types and statuses are random. No investigation outcomes are recorded."),
+            "limitation": None if prior else "No simulated prior claims in the window."}
+
+
 @safe_tool
 def get_claim_history(claim: Mapping[str, Any], years: Optional[int] = 5,
-                      source: Optional[str | Path] = None, customer_id: Optional[str] = None) -> dict[str, Any]:
+                      source: Optional[str | Path] = None, customer_id: Optional[str] = None,
+                      simulated: Optional[bool] = None) -> dict[str, Any]:
     """Return previous claims for the same policy (or verified customer) within `years`
-    before the accident, with dates, statuses and outcomes, or `unavailable` and why."""
+    before the accident, with dates, statuses and outcomes, or `unavailable` and why.
+    With simulated data enabled (and no explicit source), prior claims come from the
+    SIMULATED reference database."""
+    from src.simulated.db import enabled
     n = require_valid_claim(claim)
     record = n.claim.to_record()
+    if enabled(simulated) and source is None and customer_id is None:
+        sim = simulated_history(record, n.claim_id, years)
+        if sim is not None:
+            return jsonable(sim)
     pn = record.get("PolicyNumber")
     entity = {"customer_id": customer_id} if customer_id else {"policy_id": f"PN-{pn}" if pn is not None else None}
     summary = {"fields": {f: record.get(f) for f in SUMMARY_FIELDS},

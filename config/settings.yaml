@@ -49,13 +49,24 @@ agent:
   # Evidence sources that must be present before reasoning. If the orchestrator LLM did not
   # call one, complete_investigation runs it (logged as `auto`, not as an agent choice). All
   # are local and deterministic. similar_claims and claim_history stay the agent's choice.
-  required_tools: [fraud_score, shap_explanation, policy_retrieval, policy_verification]
+  required_tools: [fraud_score, shap_explanation, policy_retrieval, policy_verification, similar_claims]
 
 # Tool 6 source: an authorised claim-history file (CSV / JSONL with policy_id or customer_id,
 # claim_id, claim_date, incident_type, status, outcome). The project data has none
 # (PolicyNumber is unique per claim), so the tool reports `unavailable`.
 claim_history:
   source: null
+
+# SIMULATED reference database (docs/simulated_data_plan.md): illustrative policies, clauses and
+# prior claims so Tools 3, 4 and 6 have data. Built by scripts/build_simulated_db.py; never
+# derived from the fraud label. enabled: false = tools behave exactly as without it. The
+# evaluation sets the mode per run (--simulated-data off|on|both).
+simulated_data:
+  enabled: false
+  path: data/simulated/insurance.db
+  clauses: config/simulated_policy_clauses.yaml
+  seed: 42
+  write_runtime_tables: true
 
 # Model inputs (decided in the Step A EDA, docs/report/01_eda_report.md §5).
 # Excluded: PolicyNumber, is_synthetic (leakage); PolicyType, AgeOfPolicyHolder (display only);

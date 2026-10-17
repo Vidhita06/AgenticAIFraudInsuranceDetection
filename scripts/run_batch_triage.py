@@ -10,6 +10,10 @@ a prompt; for slow local models use --sample-size and read the time estimate.
     python scripts/run_batch_triage.py pilot [--n 5]
     python scripts/run_batch_triage.py final [--sample-size 40] [--max-cost 20]
 
+--simulated-data off|on|both (default both) runs the same claims without and with the SIMULATED
+reference database (scripts/build_simulated_db.py) and reports both side by side. Each mode
+is its own once-only test evaluation per model.
+
 The provider and model come from .env (LLM_PROVIDER, MODEL_NAME; see .env.example) or
 --provider/--model. --batch uses BATCH_MODEL_NAME. --sample-size N = N test frauds + N legit
 claims (default: all 138 frauds + 138 legit). The test set is evaluated once per model.
@@ -21,6 +25,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+
+import pandas as pd
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,8 +35,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from evaluation.agent_eval import (  # noqa: E402
-    RESULTS_DIR, UsageTracker, confirm, estimate_cost, judge_rationales, load_results, load_split,
-    manual_review_sample, measured_per_run, pricing, run_batch, stratified_sample, summarize,
+    MODES, RESULTS_DIR, UsageTracker, compare_modes, confirm, estimate_cost, judge_rationales, load_results,
+    load_split, manual_review_sample, measured_per_run, pricing, run_batch, stratified_sample, summarize,
     test_marker, write_report,
 )
 from src.config import load_config  # noqa: E402
@@ -44,6 +50,7 @@ class Plan:
     consistency_claims: int
     consistency_runs: int
     judge_claims: int
+    modes: tuple[str, ...] = ("off",)
 
     @property
     def slug(self) -> str:
@@ -62,13 +69,24 @@ def make_plan(args) -> Plan:
     judge = args.judge_claims if args.judge_claims is not None else ev["judge_claims"]
     if total:
         cons, judge = min(cons, total), min(judge, total)
-    return Plan(provider, model, n, cons, ev["consistency_runs"], judge)
+    modes = ("off", "on") if args.simulated_data == "both" else (args.simulated_data,)
+    return Plan(provider, model, n, cons, ev["consistency_runs"], judge, modes)
 
 
-def make_runner(plan: Plan, need_llm: bool):
+def check_simulated(plan: Plan) -> None:
+    if "on" in plan.modes:
+        from src.simulated.db import db_path
+        if not db_path().exists():
+            sys.exit(f"--simulated-data {'both' if len(plan.modes) == 2 else 'on'} needs the simulated reference "
+                     "database: run python scripts/build_simulated_db.py (or use --simulated-data off)")
+
+
+def make_runner(plan: Plan, need_llm: bool, mode: str = "off"):
     from src.agent.runner import TriageRunner
     if not need_llm:
-        return TriageRunner(llm=None)
+        r = TriageRunner(llm=None)
+        r.deps.simulated = MODES[mode]
+        return r
     from src.agent.llm import check_ollama, get_llm, llm_settings, needs_api_key
     s = {**llm_settings(), "provider": plan.provider}
     if plan.provider == "ollama":
@@ -83,6 +101,7 @@ def make_runner(plan: Plan, need_llm: bool):
     synth = get_llm(provider=plan.provider, model=plan.model, json_mode=True) if plan.provider == "ollama" else None
     runner = TriageRunner(llm=llm)
     runner.deps.synth_llm = synth
+    runner.deps.simulated = MODES[mode]
     return runner
 
 
@@ -111,7 +130,7 @@ def final_sample(plan: Plan, seed: int):
 
 
 def final_runs(plan: Plan, sample) -> int:
-    return len(sample) + plan.consistency_claims * (plan.consistency_runs - 1)
+    return len(plan.modes) * (len(sample) + plan.consistency_claims * (plan.consistency_runs - 1))
 
 
 def probe_claims(seed: int):
@@ -120,19 +139,41 @@ def probe_claims(seed: int):
 
 def estimate_final(plan: Plan, seed: int, measured: dict | None):
     sample = final_sample(plan, seed)
-    return sample, estimate_cost(sample, plan.model, final_runs(plan, sample), plan.judge_claims,
+    return sample, estimate_cost(sample, plan.model, final_runs(plan, sample), plan.judge_claims * len(plan.modes),
                                  measured or None, probe=probe_claims(seed), provider=plan.provider)
 
 
+def report_modes(dfs: dict, legit_weight: float, path_title_meta, judges: dict | None = None) -> dict:
+    """Write docs/report/03_agent_evaluation.md (+ per-model copy): one mode, or both side by side."""
+    summaries = {m: summarize(d, legit_weight=legit_weight, judge=(judges or {}).get(m)) for m, d in dfs.items()}
+    cmp = compare_modes(dfs, legit_weight) if set(dfs) == {"off", "on"} else None
+    for path, title, meta in path_title_meta:
+        if cmp is None:
+            write_report(next(iter(summaries.values())), path, title, meta)
+        else:
+            write_report(None, path, title, meta, mode_summaries=summaries, comparison=cmp)
+    return {"summaries": summaries, "comparison": cmp}
+
+
 def stage_offline(args, plan: Plan) -> None:
+    check_simulated(plan)
     df = load_split(args.split)
     sample = stratified_sample(df, n=args.n, seed=args.seed) if args.n else stratified_sample(df, seed=args.seed)
-    runner = make_runner(plan, need_llm=False)
-    out = RESULTS_DIR / f"offline_{args.split}_{stamp()}.jsonl"
-    print(f"offline (rule-based, no LLM) run on {len(sample)} {args.split} claims -> {out.relative_to(ROOT)}")
-    run_batch(sample, runner, args.split, out)
-    s = summarize(load_results([out]), legit_weight=sample.attrs.get("legit_weight", 1.0))
-    print(s["decision_quality"].round(3).to_string(index=False))
+    dfs = {}
+    for mode in plan.modes:
+        runner = make_runner(plan, need_llm=False, mode=mode)
+        out = RESULTS_DIR / f"offline_{args.split}_sim{mode}_{stamp()}.jsonl"
+        print(f"offline (rule-based, no LLM, simulated data {mode}) on {len(sample)} {args.split} claims "
+              f"-> {out.relative_to(ROOT)}")
+        run_batch(sample, runner, args.split, out)
+        dfs[mode] = load_results([out])
+        s = summarize(dfs[mode], legit_weight=sample.attrs.get("legit_weight", 1.0))
+        print(s["decision_quality"].round(3).to_string(index=False))
+    if len(dfs) == 2:
+        cmp = compare_modes(dfs, sample.attrs.get("legit_weight", 1.0))
+        print("\nSimulated data off vs on (agent):")
+        print(cmp["decision_quality"].round(3).to_string(index=False))
+        print(f"{len(cmp['changed'])} claims changed decision or flag category")
 
 
 def stage_estimate(args, plan: Plan) -> None:
@@ -148,30 +189,42 @@ def stage_estimate(args, plan: Plan) -> None:
 
 
 def stage_pilot(args, plan: Plan) -> dict:
+    check_simulated(plan)
     n = args.n or load_config()["evaluation"]["pilot_claims"]
     sample = stratified_sample(load_split("validation"), n=n, seed=args.seed)
-    est = estimate_cost(sample, plan.model, len(sample), provider=plan.provider)
+    est = estimate_cost(sample, plan.model, len(sample) * len(plan.modes), provider=plan.provider)
     if args.max_cost and est.usd > args.max_cost:
         sys.exit(f"Estimate ${est.usd:.2f} exceeds --max-cost {args.max_cost}")
-    runner = make_runner(plan, need_llm=True)          # fails fast: no key / Ollama down (no spend)
-    if not confirm("PILOT: " + est.describe(plan.model), args.yes, free=est.free):
+    runners = {m: make_runner(plan, need_llm=True, mode=m) for m in plan.modes}   # fails fast, no spend
+    if not confirm(f"PILOT (simulated data: {'/'.join(plan.modes)}): " + est.describe(plan.model), args.yes,
+                   free=est.free):
         sys.exit("Not run.")
-    out = RESULTS_DIR / f"pilot_validation_{plan.slug}_{stamp()}.jsonl"
-    recs = run_batch(sample, runner, "validation", out, model_name=plan.model, provider=plan.provider)
-    meas = measured_per_run(recs) or {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
-                                       "latency_s": sum(r["latency_s"] for r in recs) / max(len(recs), 1)}
-    print(f"\nPilot done: {len(recs)} claims, ${sum(r['cost_usd'] for r in recs):.4f} spent; per claim: "
+    all_recs, dfs = [], {}
+    for mode in plan.modes:
+        out = RESULTS_DIR / f"pilot_validation_{plan.slug}_sim{mode}_{stamp()}.jsonl"
+        print(f"\nPilot, simulated data {mode}:")
+        recs = run_batch(sample, runners[mode], "validation", out, model_name=plan.model, provider=plan.provider)
+        all_recs += recs
+        dfs[mode] = load_results([out])
+        for r in recs:
+            tools = ",".join(r["tools_called"]) or "none"
+            auto = ",".join(r.get("auto_tools") or []) or "none"
+            cat = f"/{r['flag_category']}" if r.get("flag_category") else ""
+            print(f"  {r['claim_id']:>9} label={r['label']} -> {str(r['decision']) + cat:<42} ({r['decided_by']}, "
+                  f"agent tools={tools}; auto={auto}; removed evidence={r['grounding_removed']}, "
+                  f"llm failures={r['llm_failures']})")
+    meas = measured_per_run(all_recs) or {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+                                           "latency_s": sum(r["latency_s"] for r in all_recs) / max(len(all_recs), 1)}
+    print(f"\nPilot done: {len(all_recs)} runs, ${sum(r['cost_usd'] for r in all_recs):.4f} spent; per run: "
           f"{meas['input_tokens']:.0f} input / {meas['output_tokens']:.0f} output tokens, "
           f"${meas['cost_usd']:.4f}, {meas['latency_s']:.1f}s")
-    for r in recs:
-        tools = ",".join(r["tools_called"]) or "none"
-        auto = ",".join(r.get("auto_tools") or []) or "none"
-        print(f"  {r['claim_id']:>9} label={r['label']} -> {str(r['decision']):<26} ({r['decided_by']}, "
-              f"agent tools={tools}; auto={auto}; removed evidence={r['grounding_removed']}, "
-              f"llm failures={r['llm_failures']})")
-    fallback = sum(r["decided_by"] == "rule_fallback" for r in recs)
+    if len(dfs) == 2:
+        ch = compare_modes(dfs)["changed"]
+        print(f"Simulated data changed the decision or flag category of {len(ch)}/{len(sample)} pilot claims"
+              + (":\n" + ch.to_string(index=False) if len(ch) else "."))
+    fallback = sum(r["decided_by"] == "rule_fallback" for r in all_recs)
     if fallback:
-        print(f"  NOTE: {fallback}/{len(recs)} claims fell back to the rule-based decision "
+        print(f"  NOTE: {fallback}/{len(all_recs)} runs fell back to the rule-based decision "
               "(the model failed or returned invalid JSON twice). Consider a larger model.")
     _, est_f = estimate_final(plan, args.seed, meas)
     print("\nProjected FINAL run: " + est_f.describe(plan.model))
@@ -179,61 +232,74 @@ def stage_pilot(args, plan: Plan) -> dict:
 
 
 def stage_final(args, plan: Plan, measured: dict | None = None) -> None:
-    marker = test_marker(plan.model)
-    if marker.exists() and not args.force_test_rerun:
-        sys.exit(f"The final test evaluation for {plan.model} already ran ({marker.read_text().strip()}). "
-                 "The test set is evaluated once per model; pass --force-test-rerun only if that run was invalid.")
+    check_simulated(plan)
+    markers = {m: test_marker(plan.model, m) for m in plan.modes}
+    done = [m for m, mk in markers.items() if mk.exists()]
+    if done and not args.force_test_rerun:
+        sys.exit(f"The final test evaluation for {plan.model} (simulated data {', '.join(done)}) already ran "
+                 f"({markers[done[0]].read_text().strip()}). The test set is evaluated once per model and mode; "
+                 "pass --force-test-rerun only if that run was invalid.")
     measured = measured or latest_pilot(plan)
     sample, est = estimate_final(plan, args.seed, measured)
     if args.max_cost and est.usd > args.max_cost:
         sys.exit(f"Estimate ${est.usd:.2f} exceeds --max-cost {args.max_cost}")
-    runner = make_runner(plan, need_llm=True)          # fails fast: no key / Ollama down (no spend)
-    if not confirm(f"FINAL (test set, runs once per model): {est.describe(plan.model)}", args.yes, free=est.free):
+    runners = {m: make_runner(plan, need_llm=True, mode=m) for m in plan.modes}   # fails fast, no spend
+    if not confirm(f"FINAL (test set, once per model and mode; simulated data {'/'.join(plan.modes)}): "
+                   f"{est.describe(plan.model)}", args.yes, free=est.free):
         sys.exit("Not run.")
     ts = stamp()
-    out = RESULTS_DIR / f"final_test_{plan.slug}_{ts}.jsonl"
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(f"{out.name} started {ts}\n")
     n_fraud = int(sample.FraudFound_P.sum())
-    print(f"Primary run: {len(sample)} test claims ({n_fraud} frauds, {len(sample) - n_fraud} legit) on {plan.model}")
-    run_batch(sample, runner, "test", out, run_index=0, model_name=plan.model, provider=plan.provider)
     rep = sample.sample(min(plan.consistency_claims, len(sample)), random_state=args.seed)
-    for k in range(1, plan.consistency_runs if plan.consistency_claims else 1):
-        print(f"Consistency run {k + 1}/{plan.consistency_runs} on {len(rep)} claims")
-        run_batch(rep, runner, "test", out, run_index=k, model_name=plan.model, provider=plan.provider)
-    df = load_results([out])
-    tracker = UsageTracker()
-    judge = None
-    if plan.judge_claims:
-        print(f"LLM-as-judge on up to {plan.judge_claims} rationales")
-        judge = judge_rationales(df, runner.deps.llm, n=plan.judge_claims, tracker=tracker)
-        judge.to_csv(RESULTS_DIR / f"judge_{plan.slug}_{ts}.csv", index=False)
+    dfs, judges, outs, judge_cost = {}, {}, {}, 0.0
     pr = pricing(plan.model, plan.provider)
-    judge_cost = (tracker.input_tokens * pr["input"] + tracker.output_tokens * pr["output"]) / 1e6
-    manual_review_sample(df, load_config()["evaluation"]["manual_review_claims"], args.seed).to_csv(
-        RESULTS_DIR / f"manual_review_{plan.slug}_{ts}.csv", index=False)
-    s = summarize(df, legit_weight=sample.attrs["legit_weight"], judge=judge)
+    for mode in plan.modes:
+        runner, marker = runners[mode], markers[mode]
+        out = RESULTS_DIR / f"final_test_{plan.slug}_sim{mode}_{ts}.jsonl"
+        outs[mode] = out.name
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{out.name} started {ts}\n")
+        print(f"Primary run (simulated data {mode}): {len(sample)} test claims ({n_fraud} frauds, "
+              f"{len(sample) - n_fraud} legit) on {plan.model}")
+        run_batch(sample, runner, "test", out, run_index=0, model_name=plan.model, provider=plan.provider)
+        for k in range(1, plan.consistency_runs if plan.consistency_claims else 1):
+            print(f"Consistency run {k + 1}/{plan.consistency_runs} on {len(rep)} claims (simulated data {mode})")
+            run_batch(rep, runner, "test", out, run_index=k, model_name=plan.model, provider=plan.provider)
+        dfs[mode] = load_results([out])
+        if plan.judge_claims:
+            tracker = UsageTracker()
+            print(f"LLM-as-judge on up to {plan.judge_claims} rationales (simulated data {mode})")
+            judges[mode] = judge_rationales(dfs[mode], runner.deps.llm, n=plan.judge_claims, tracker=tracker)
+            judges[mode].to_csv(RESULTS_DIR / f"judge_{plan.slug}_sim{mode}_{ts}.csv", index=False)
+            judge_cost += (tracker.input_tokens * pr["input"] + tracker.output_tokens * pr["output"]) / 1e6
+        manual_review_sample(dfs[mode], load_config()["evaluation"]["manual_review_claims"], args.seed).to_csv(
+            RESULTS_DIR / f"manual_review_{plan.slug}_sim{mode}_{ts}.csv", index=False)
+    all_df = pd.concat(dfs.values(), ignore_index=True)
     meta = {"model": plan.model, "provider": plan.provider,
+            "simulated reference data": " and ".join(plan.modes) + (" (side by side)" if len(plan.modes) == 2 else ""),
             "sample": (f"{n_fraud} frauds + {len(sample) - n_fraud} legit test claims"
                        + (" (--sample-size)" if plan.sample_size else " (all test frauds)")),
-            "consistency": f"{len(rep) if plan.consistency_claims else 0} claims x {plan.consistency_runs} runs",
-            "judge rationales": len(judge) if judge is not None else 0,
-            "agent runs": len(df), "results": out.name,
-            "agent cost USD": round(float(df.cost_usd.sum()), 4), "judge cost USD": round(judge_cost, 4),
+            "consistency": f"{len(rep) if plan.consistency_claims else 0} claims x {plan.consistency_runs} runs per mode",
+            "judge rationales": sum(len(j) for j in judges.values()),
+            "agent runs": len(all_df), "results": ", ".join(outs.values()),
+            "agent cost USD": round(float(all_df.cost_usd.sum()), 4), "judge cost USD": round(judge_cost, 4),
             "price basis": pr["note"],
-            "mean latency s": round(float(df.latency_s.mean()), 1),
+            "mean latency s": round(float(all_df.latency_s.mean()), 1),
             "model artifacts": json.loads((ROOT / "models" / "model_card.json").read_text())["model_version"]}
     title = f"Agent Evaluation (test set): {plan.model}, {len(sample)} claims"
     report_dir = ROOT / "docs" / "report"
-    path = write_report(s, report_dir / "03_agent_evaluation.md", title, meta)
-    write_report(s, report_dir / f"03_agent_evaluation_{plan.slug}.md", title, meta)
+    res = report_modes(dfs, sample.attrs["legit_weight"],
+                       [(report_dir / "03_agent_evaluation.md", title, meta),
+                        (report_dir / f"03_agent_evaluation_{plan.slug}.md", title, meta)], judges)
     (RESULTS_DIR / f"summary_{plan.slug}_{ts}.json").write_text(json.dumps(
-        {"meta": meta, "process": s["process"], "consistency": s["consistency"], "judge": s["judge"],
-         "decision_quality": s["decision_quality"].to_dict("records")}, indent=2, default=str))
-    marker.write_text(f"{out.name} completed {stamp()}\n")
-    print(s["decision_quality"].round(3).to_string(index=False))
-    print(f"\nReport: {path.relative_to(ROOT)} (+ 03_agent_evaluation_{plan.slug}.md) | "
-          f"manual review sheet: evaluation/results/manual_review_{plan.slug}_{ts}.csv")
+        {"meta": meta, **{m: {"process": sm["process"], "consistency": sm["consistency"], "judge": sm["judge"],
+                              "decision_quality": sm["decision_quality"].to_dict("records")}
+                          for m, sm in res["summaries"].items()}}, indent=2, default=str))
+    for mode in plan.modes:
+        markers[mode].write_text(f"{outs[mode]} completed {stamp()}\n")
+        print(f"\nSimulated data {mode}:")
+        print(res["summaries"][mode]["decision_quality"].round(3).to_string(index=False))
+    print(f"\nReport: docs/report/03_agent_evaluation.md (+ 03_agent_evaluation_{plan.slug}.md) | "
+          f"manual review sheets: evaluation/results/manual_review_{plan.slug}_sim*_{ts}.csv")
 
 
 def main() -> None:
@@ -253,6 +319,8 @@ def main() -> None:
     ap.add_argument("--pause", type=float, default=0.0, help="seconds to wait between claims (free-tier rate limits)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--force-test-rerun", action="store_true")
+    ap.add_argument("--simulated-data", default="both", choices=["off", "on", "both"],
+                    help="SIMULATED reference database for Tools 3, 4, 6: off, on, or both side by side")
     args = ap.parse_args()
     if args.pause:
         import evaluation.agent_eval as _ae

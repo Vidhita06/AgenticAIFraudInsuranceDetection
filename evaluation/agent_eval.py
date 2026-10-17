@@ -87,10 +87,13 @@ def pricing(model: str, provider: str = "anthropic") -> dict[str, Any]:
     raise KeyError(f"no price for model {model!r}; add it to llm_pricing_usd_per_mtok in settings.yaml")
 
 
-def test_marker(model: str) -> Path:
-    """The test set is evaluated once per agent model."""
+MODES = {"off": False, "on": True}      # simulated reference data
+
+
+def test_marker(model: str, mode: str = "off") -> Path:
+    """The test set is evaluated once per agent model and simulated-data mode."""
     slug = "".join(c if c.isalnum() or c in "-." else "_" for c in model)
-    return RESULTS_DIR / f".test_evaluation_done_{slug}"
+    return RESULTS_DIR / (f".test_evaluation_done_{slug}" + ("" if mode == "off" else f"_sim{mode}"))
 
 
 @dataclass
@@ -212,12 +215,18 @@ class UsageTracker(BaseCallbackHandler):
                 self.output_tokens += int(usage.get("output_tokens", 0) or 0)
 
 
-def model_only_decision(tool_results: Mapping[str, Any]) -> str:
+def model_only(tool_results: Mapping[str, Any]) -> tuple[str, Optional[str]]:
     """The threshold policy without the agent: blocking -> REQUEST_MORE_INFORMATION,
-    high band -> FLAG, otherwise APPROVE (same rules as the rule-based fallback)."""
+    high band -> FLAG (FRAUD_RISK), no score -> FLAG (SYSTEM_FAILURE), otherwise APPROVE
+    (the rule-based fallback restricted to validation and the fraud score)."""
     from src.agent.guardrails import rule_based_decision
-    return rule_based_decision("", {"validation": tool_results.get("validation"),
-                                    "fraud_score": tool_results.get("fraud_score")}, "model-only").decision
+    d = rule_based_decision("", {"validation": tool_results.get("validation"),
+                                 "fraud_score": tool_results.get("fraud_score")}, "model-only")
+    return d.decision, d.flag_category
+
+
+def model_only_decision(tool_results: Mapping[str, Any]) -> str:
+    return model_only(tool_results)[0]
 
 
 def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_index: int = 0,
@@ -254,6 +263,9 @@ def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_inde
                  if c.get("origin", "agent") == "agent"]
         auto = [n for t in trace if t["node"] == "complete_investigation" for n in t.get("auto_tools", [])]
         record = state.get("evidence_record") or {}
+        mo_decision, mo_category = model_only(tr) if tr else (None, None)
+        pv = tr.get("policy_verification") or {}
+        ch = tr.get("claim_history") or {}
         interventions = [iv["guardrail"] for t in trace if t["node"] == "guardrails" for iv in t.get("interventions", [])]
         cost = ((tracker.input_tokens * price["input"] + tracker.output_tokens * price["output"]) / 1e6
                 if price else 0.0)
@@ -261,7 +273,12 @@ def run_batch(claims: pd.DataFrame, runner, split: str, out_path: Path, run_inde
             "split": split, "run_index": run_index, "claim_id": state.get("claim_id", f"PN-{row.get('PolicyNumber')}"),
             "policy_number": row.get("PolicyNumber"), "label": label, "thread_id": thread,
             "decision": d.get("decision"), "decided_by": d.get("decided_by"),
-            "model_only_decision": model_only_decision(tr) if tr else None,
+            "flag_category": d.get("flag_category"),
+            "model_only_decision": mo_decision, "model_only_flag_category": mo_category,
+            "simulated_data": bool(getattr(runner.deps, "simulated_enabled", False)),
+            "policy_checks": {c["check_id"]: c["result"] for c in pv.get("checks", [])} if pv.get("ok") else {},
+            "history_status": ch.get("status") if ch.get("ok") else ("failed" if ch else "not_run"),
+            "history_count": ch.get("previous_claim_count") if ch.get("ok") else None,
             "fraud_probability": d.get("fraud_probability"), "risk_band": d.get("risk_band"),
             "tools_called": calls, "auto_tools": auto, "agent_steps": int(state.get("steps", 0) or 0),
             "investigation_id": d.get("investigation_id"), "investigation_status": d.get("investigation_status"),
@@ -319,6 +336,18 @@ def load_results(paths: Iterable[str | Path]) -> pd.DataFrame:
     for col in ("auto_tools", "reason_codes", "conflicting_evidence"):
         if col in df:
             df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
+    # Results written before flag categories existed: every flag then came from the risk band.
+    for dec, cat in (("decision", "flag_category"), ("model_only_decision", "model_only_flag_category")):
+        if dec in df:
+            if cat not in df:
+                df[cat] = None
+            df[cat] = [c if isinstance(c, str) else ("FRAUD_RISK" if d == "FLAG_FOR_INVESTIGATION" else None)
+                       for d, c in zip(df[dec], df[cat])]
+    if "simulated_data" not in df:
+        df["simulated_data"] = False
+    if "policy_checks" not in df:
+        df["policy_checks"] = [{} for _ in range(len(df))]
+    df["policy_checks"] = df["policy_checks"].apply(lambda x: x if isinstance(x, dict) else {})
     return df
 
 
@@ -328,25 +357,35 @@ def _rate(k: int, n: int) -> dict[str, Any]:
 
 
 def decision_quality(df: pd.DataFrame, legit_weight: float = 1.0) -> pd.DataFrame:
-    """Agent vs model-only threshold policy on the primary runs (run_index 0)."""
+    """Agent vs model-only threshold policy on the primary runs (run_index 0). Fraud recall and
+    precision count FRAUD_RISK flags only; policy-condition and system-failure flags are
+    reported as separate counts, so a coverage problem never counts as fraud caught."""
     d = df[df.run_index == 0]
     rows = []
-    for col, name in (("decision", "agent"), ("model_only_decision", "model-only threshold policy")):
+    for col, cat_col, name in (("decision", "flag_category", "agent"),
+                               ("model_only_decision", "model_only_flag_category", "model-only threshold policy")):
         fr, lg = d[d.label == 1], d[d.label == 0]
-        flag_f = int((fr[col] == "FLAG_FOR_INVESTIGATION").sum())
-        flag_l = int((lg[col] == "FLAG_FOR_INVESTIGATION").sum())
+        fraud_flag = lambda x: (x[col] == "FLAG_FOR_INVESTIGATION") & (x[cat_col] == "FRAUD_RISK")
+        flag_f = int(fraud_flag(fr).sum())
+        flag_l = int(fraud_flag(lg).sum())
         prec_sample = flag_f / (flag_f + flag_l) if flag_f + flag_l else np.nan
         prec_pop = flag_f / (flag_f + legit_weight * flag_l) if flag_f + flag_l else np.nan
+        other = lambda x, c: int(((x[col] == "FLAG_FOR_INVESTIGATION") & (x[cat_col] == c)).sum())
         for metric, (k, n) in {
-            "fraud -> FLAG (recall)": (flag_f, len(fr)),
+            "fraud -> FRAUD_RISK flag (recall)": (flag_f, len(fr)),
             "legit -> APPROVE": (int((lg[col] == "APPROVE").sum()), len(lg)),
-            "legit -> FLAG (false-flag rate)": (flag_l, len(lg)),
+            "legit -> FRAUD_RISK flag (false-flag rate)": (flag_l, len(lg)),
             "REQUEST_MORE_INFORMATION (all claims)": (int((d[col] == "REQUEST_MORE_INFORMATION").sum()), len(d)),
+            "POLICY_CONDITION flags (all claims)": (other(d, "POLICY_CONDITION"), len(d)),
+            "SYSTEM_FAILURE flags (all claims)": (other(d, "SYSTEM_FAILURE"), len(d)),
         }.items():
             rows.append({"policy": name, "metric": metric, **_rate(k, n)})
-        rows.append({"policy": name, "metric": "FLAG precision (sample)", "k": flag_f, "n": flag_f + flag_l,
+        for c in ("POLICY_CONDITION", "SYSTEM_FAILURE"):
+            rows.append({"policy": name, "metric": f"{c} flags: frauds / legit", "k": other(fr, c),
+                         "n": other(lg, c), "rate": np.nan, "lo": np.nan, "hi": np.nan})
+        rows.append({"policy": name, "metric": "FRAUD_RISK flag precision (sample)", "k": flag_f, "n": flag_f + flag_l,
                      "rate": prec_sample, "lo": np.nan, "hi": np.nan})
-        rows.append({"policy": name, "metric": "FLAG precision (re-weighted to true prevalence)",
+        rows.append({"policy": name, "metric": "FRAUD_RISK flag precision (re-weighted to true prevalence)",
                      "k": flag_f, "n": flag_f + flag_l, "rate": prec_pop, "lo": np.nan, "hi": np.nan})
     return pd.DataFrame(rows)
 
@@ -372,6 +411,8 @@ def process_metrics(df: pd.DataFrame) -> dict[str, Any]:
         "auto_run_rate": auto_rate,
         "reason_code_counts": {k: int(v) for k, v in codes.items()},
         "claims_with_conflicts": int(d["conflicting_evidence"].apply(len).gt(0).sum()) if "conflicting_evidence" in d else 0,
+        "flag_categories": {k: int(v) for k, v in d.loc[d.decision == "FLAG_FOR_INVESTIGATION", "flag_category"]
+                            .value_counts().items()} if "flag_category" in d else {},
         "mean_tool_calls": float(d.tools_called.apply(len).mean()),
         "mean_agent_steps": float(d.agent_steps.mean()),
         "max_steps_hits": int(d.max_steps_reached.sum()),
@@ -492,22 +533,103 @@ def summarize(df: pd.DataFrame, legit_weight: float = 1.0, judge: pd.DataFrame |
                    if c in judge]].mean().to_dict()}
 
 
-def write_report(summary: Mapping[str, Any], path: Path, title: str, meta: Mapping[str, Any]) -> Path:
+def _policy_check_shares(d: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    checks = sorted({c for pc in d.policy_checks for c in pc})
+    for c in checks:
+        res = d.policy_checks.apply(lambda pc: pc.get(c))
+        ran = res.notna().sum()
+        rows.append({"check": c, "claims": int(ran), **{r: int((res == r).sum()) for r in ("PASS", "FAIL", "UNKNOWN")}})
+    return pd.DataFrame(rows)
+
+
+def compare_modes(dfs: Mapping[str, pd.DataFrame], legit_weight: float = 1.0) -> dict[str, Any]:
+    """Side by side: the same claims with simulated reference data off and on."""
+    off, on = (dfs[m][dfs[m].run_index == 0] for m in ("off", "on"))
+    dq = {m: decision_quality(dfs[m], legit_weight) for m in ("off", "on")}
+    agent = lambda m: dq[m][dq[m].policy == "agent"].set_index("metric")
+    a_off, a_on = agent("off"), agent("on")
+    table = pd.DataFrame({"off": a_off["rate"], "on": a_on["rate"],
+                          "off k/n": [f"{k}/{n}" for k, n in zip(a_off.k, a_off.n)],
+                          "on k/n": [f"{k}/{n}" for k, n in zip(a_on.k, a_on.n)]})
+    table["Δ (on − off)"] = table["on"] - table["off"]
+    table = table.reset_index()
+    proc = {m: process_metrics(dfs[m]) for m in ("off", "on")}
+    keys = ["mean_tool_calls", "fallback_rate", "claims_with_conflicts", "mean_evidence_kept", "latency_p50_s",
+            "mean_input_tokens"]
+    process = pd.DataFrame([{"metric": k, "off": proc["off"].get(k), "on": proc["on"].get(k)} for k in keys])
+    hist = pd.DataFrame([{"mode": m, **d.history_status.value_counts().to_dict(),
+                          "mean prior claims": d.history_count.dropna().mean() if d.history_count.notna().any() else None}
+                         for m, d in (("off", off), ("on", on)) if "history_status" in d])
+    j = off[["policy_number", "label", "decision", "flag_category"]].merge(
+        on[["policy_number", "decision", "flag_category", "reason_codes", "policy_checks", "history_count"]],
+        on="policy_number", suffixes=(" (off)", " (on)"))
+    cat_off, cat_on = j["flag_category (off)"].fillna(""), j["flag_category (on)"].fillna("")
+    changed = j[(j["decision (off)"] != j["decision (on)"]) | (cat_off != cat_on)]
+    cause = lambda r: ", ".join([c for c, v in r["policy_checks"].items() if v == "FAIL"]
+                                + ([f"{int(r['history_count'])} simulated prior claims"]
+                                   if pd.notna(r["history_count"]) else [])) or "LLM judgement"
+    changed = changed.assign(cause=[cause(r) for _, r in changed.iterrows()])
+    changed = changed[["policy_number", "label", "decision (off)", "flag_category (off)", "decision (on)",
+                       "flag_category (on)", "cause"]]
+    return {"decision_quality": table, "process": process, "history": hist,
+            "policy_checks": {m: _policy_check_shares(d) for m, d in (("off", off), ("on", on))},
+            "changed": changed, "n_claims": int(len(j))}
+
+
+def _summary_lines(summary: Mapping[str, Any], level: str = "##") -> list[str]:
     p = summary["process"]
     dq = summary["decision_quality"].copy()
     dq["95% CI"] = [f"[{lo:.3f}, {hi:.3f}]" if not np.isnan(lo) else "" for lo, hi in zip(dq.lo, dq.hi)]
     dq = dq[["policy", "metric", "k", "n", "rate", "95% CI"]]
-    lines = [f"# {title}", "", "_Generated by `evaluation/agent_eval.py`._", "",
-             "## Run", "", _md(pd.DataFrame([{"key": k, "value": v} for k, v in meta.items()])), "",
-             "## Decision quality vs the model-only threshold policy", "", _md(dq), "",
+    lines = [f"{level} Decision quality vs the model-only threshold policy", "",
+             "Fraud recall and precision count **FRAUD_RISK flags only**. POLICY_CONDITION and SYSTEM_FAILURE "
+             "flags are reported as separate counts; they are not fraud caught.", "", _md(dq), "",
              "Agreement between the model-only policy (rows) and the agent (columns):", "",
              _md(summary["agreement"].reset_index()), "",
-             "## Process", "", _md(pd.DataFrame([{"metric": k, "value": json.dumps(v) if isinstance(v, (dict, list)) else v}
-                                                for k, v in p.items()]), "{:.4f}"), "",
-             "## Run-to-run consistency", "", json.dumps(summary["consistency"]), ""]
+             f"{level} Process", "", _md(pd.DataFrame([{"metric": k, "value": json.dumps(v) if isinstance(v, (dict, list)) else v}
+                                                      for k, v in p.items()]), "{:.4f}"), "",
+             f"{level} Run-to-run consistency", "", json.dumps(summary["consistency"]), ""]
     if summary.get("judge"):
-        lines += ["## Rationale quality (LLM-as-judge, share of 1s)", "",
+        lines += [f"{level} Rationale quality (LLM-as-judge, share of 1s)", "",
                   _md(pd.DataFrame([{"criterion": k, "score": v} for k, v in summary["judge"].items()])), ""]
+    return lines
+
+
+def comparison_lines(cmp: Mapping[str, Any]) -> list[str]:
+    lines = ["## Simulated reference data: off vs on (same claims)", "",
+             "> **Caveat.** With simulated data **on**, policy terms, policy dates, coverage limits and prior "
+             "claims come from the SIMULATED reference database (`data/simulated/insurance.db`, "
+             "illustrative wording written by the project team, never derived from the fraud label). "
+             "Differences show how the agent *uses* such evidence, not real fraud-detection gains.", "",
+             f"Claims compared: {cmp['n_claims']}.", "",
+             "### Agent decision quality", "", _md(cmp["decision_quality"]), "",
+             "### Process", "", _md(cmp["process"], "{:.3f}"), ""]
+    if len(cmp["history"]):
+        lines += ["### Claim history availability", "", _md(cmp["history"], "{:.2f}"), ""]
+    for m in ("off", "on"):
+        t = cmp["policy_checks"][m]
+        if len(t):
+            lines += [f"### Policy verification results, simulated data {m}", "", _md(t), ""]
+    ch = cmp["changed"]
+    lines += [f"### Claims whose decision or flag category changed ({len(ch)})", "",
+              _md(ch.head(50)) if len(ch) else "None.", ""]
+    return lines
+
+
+def write_report(summary: Mapping[str, Any] | None, path: Path, title: str, meta: Mapping[str, Any],
+                 mode_summaries: Optional[Mapping[str, Mapping[str, Any]]] = None,
+                 comparison: Optional[Mapping[str, Any]] = None) -> Path:
+    """One summary (single mode), or one per simulated-data mode plus their comparison."""
+    lines = [f"# {title}", "", "_Generated by `evaluation/agent_eval.py`._", "",
+             "## Run", "", _md(pd.DataFrame([{"key": k, "value": v} for k, v in meta.items()])), ""]
+    if comparison is not None:
+        lines += comparison_lines(comparison)
+    if mode_summaries:
+        for m, sm in mode_summaries.items():
+            lines += [f"## Simulated reference data {m}: full results", ""] + _summary_lines(sm, "###")
+    elif summary is not None:
+        lines += _summary_lines(summary)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
     return path

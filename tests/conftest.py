@@ -26,3 +26,22 @@ def vector_store(tmp_path_factory):
         build_index(d)
     get_searcher.cache_clear()
     return d
+
+
+@pytest.fixture(scope="session")
+def simulated_db(tmp_path_factory):
+    """The full SIMULATED reference database built into a temp dir (about 5 s), with the
+    settings pointed at it for the session."""
+    from src.config import PROJECT_ROOT, load_config, path_for
+    from src.simulated.db import get_db
+    from src.simulated.generate import build
+    cfg = load_config()["simulated_data"]
+    out = tmp_path_factory.mktemp("simdb") / "insurance.db"
+    manifest = build(out, [path_for(k) for k in ("real_train", "real_validation", "real_test")],
+                     PROJECT_ROOT / cfg["clauses"], seed=int(cfg["seed"]))
+    old = cfg["path"]
+    cfg["path"] = str(out)
+    get_db.cache_clear()
+    yield out, manifest
+    cfg["path"] = old
+    get_db.cache_clear()

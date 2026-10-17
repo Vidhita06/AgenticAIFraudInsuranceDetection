@@ -13,6 +13,10 @@ HIGH_FLAGS = {**HIGH, "risk_indicators": FLAGS}
 PV_FAIL = {"ok": True, "status": "completed", "overall_result": "FAIL", "counts": {"PASS": 7, "FAIL": 1, "UNKNOWN": 1},
            "failed_checks": ["PV04_CLAIM_TIMELINE"], "unknown_checks": ["PV08_COVERAGE_LIMITS"],
            "checks": [{"check_id": "PV04_CLAIM_TIMELINE", "result": "FAIL", "reason": "claim precedes accident"}]}
+PV_POLICY_FAIL = {**PV_FAIL, "failed_checks": ["SIM-ALL-04"], "claim_record_failures": [],
+                  "policy_condition_failures": ["SIM-ALL-04"], "source": "simulated reference data",
+                  "checks": [{"check_id": "SIM-ALL-04", "level": "policy_condition", "result": "FAIL",
+                              "reason": "Reported at least 75 days after the accident (deadline 60 days)."}]}
 PV_OK = {**PV_FAIL, "overall_result": "UNKNOWN", "counts": {"PASS": 8, "FAIL": 0, "UNKNOWN": 1}, "failed_checks": [],
          "checks": []}
 SIM = {"ok": True, "k": 5, "neighbour_frauds": 3, "neighbour_fraud_rate": 0.6, "historical_base_rate": 0.0599,
@@ -92,27 +96,68 @@ def test_rule_based_decision_cases():
     assert rule_based_decision("x", tools(LOW), "r").decision == "APPROVE"
     assert rule_based_decision("x", tools(HIGH), "r").decision == "FLAG_FOR_INVESTIGATION"
     assert rule_based_decision("x", tools(HIGH, BLOCK_VAL), "r").decision == "REQUEST_MORE_INFORMATION"
-    assert rule_based_decision("x", tools({"ok": False, "error": "e"}), "r").decision == "REQUEST_MORE_INFORMATION"
+    fb = rule_based_decision("x", tools({"ok": False, "error": "e"}), "r")
+    assert fb.decision == "FLAG_FOR_INVESTIGATION" and fb.flag_category == "SYSTEM_FAILURE"
+    fb = rule_based_decision("x", tools(LOW, policy_verification=PV_POLICY_FAIL), "r")
+    assert fb.decision == "FLAG_FOR_INVESTIGATION" and fb.flag_category == "POLICY_CONDITION"
+    fb = rule_based_decision("x", tools(LOW, shap_explanation={"ok": False, "error": "x"}), "r",
+                             required=("fraud_score", "shap_explanation"))
+    assert fb.decision == "FLAG_FOR_INVESTIGATION" and fb.flag_category == "SYSTEM_FAILURE"
     assert rule_based_decision("x", tools(LOW, policy_verification=PV_FAIL), "r").decision == "REQUEST_MORE_INFORMATION"
 
 
 def test_old_label_is_accepted():
-    d, iv = apply_guardrails(draft("REQUEST_MORE_INFO"), "PN-1", tools(LOW))
+    d, iv = apply_guardrails(draft("REQUEST_MORE_INFO"), "PN-1", tools(LOW, BLOCK_VAL))
     assert d.decision == "REQUEST_MORE_INFORMATION" and not iv
+
+
+def test_request_info_needs_a_claim_level_reason():
+    d, iv = apply_guardrails(draft("REQUEST_MORE_INFORMATION"), "PN-1", tools(HIGH))
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "FRAUD_RISK"
+    assert iv[0]["guardrail"] == "request_info_not_claim_level"
+    d, iv = apply_guardrails(draft("REQUEST_MORE_INFORMATION"), "PN-1", tools(LOW))
+    assert d.decision == "APPROVE"
+    d, iv = apply_guardrails(draft("REQUEST_MORE_INFORMATION"), "PN-1", tools(LOW, policy_verification=PV_FAIL))
+    assert d.decision == "REQUEST_MORE_INFORMATION" and not iv          # PV04: the claim contradicts itself
+
+
+def test_every_flag_has_a_category():
+    d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools(HIGH))
+    assert d.flag_category == "FRAUD_RISK"
+    d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools(LOW, policy_verification=PV_POLICY_FAIL))
+    assert d.flag_category == "POLICY_CONDITION"
+    d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools({"ok": False, "error": "x"}))
+    assert d.flag_category == "SYSTEM_FAILURE"
+    d, _ = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tools(LOW))
+    assert d.flag_category == "FRAUD_RISK"                               # the LLM's own risk judgement
+    d, _ = apply_guardrails(draft("APPROVE"), "PN-1", tools(LOW))
+    assert d.flag_category is None
+
+
+def test_simulated_evidence_is_labelled():
+    hist = {"ok": True, "status": "completed", "source": "simulated reference data", "history_available": True,
+            "previous_claim_count": 3}
+    d, _ = apply_guardrails(draft("APPROVE", ("claim_history", "3 previous claims in the window")), "PN-1",
+                            tools(LOW, claim_history=hist), simulated_data=True)
+    assert d.evidence[0].fact == "3 previous claims in the window (simulated reference data)"
+    assert d.simulated_data is True
 
 
 def test_approve_needs_a_fraud_score():
     d, iv = apply_guardrails(draft("APPROVE"), "PN-1", tools({"ok": False, "error": "model missing"}))
-    assert d.decision == "REQUEST_MORE_INFORMATION"
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "SYSTEM_FAILURE"
     assert [i["guardrail"] for i in iv] == ["approve_needs_score"]
     assert "MODEL_SCORE_UNAVAILABLE" in d.reason_codes
 
 
 def test_approve_needs_no_policy_fail():
     d, iv = apply_guardrails(draft("APPROVE"), "PN-1", tools(LOW, policy_verification=PV_FAIL))
-    assert d.decision == "REQUEST_MORE_INFORMATION"
-    assert iv[0]["guardrail"] == "approve_needs_policy_pass" and "PV04_CLAIM_TIMELINE" in iv[0]["detail"]
-    assert "POLICY_CHECK_FAILED" in d.reason_codes
+    assert d.decision == "REQUEST_MORE_INFORMATION"            # PV04 is a claim-record contradiction
+    assert iv[0]["guardrail"] == "approve_needs_consistent_claim" and "PV04_CLAIM_TIMELINE" in iv[0]["detail"]
+    assert "CLAIM_RECORD_CONTRADICTION" in d.reason_codes
+    d, iv = apply_guardrails(draft("APPROVE"), "PN-1", tools(LOW, policy_verification=PV_POLICY_FAIL))
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "POLICY_CONDITION"
+    assert iv[0]["guardrail"] == "approve_needs_policy_pass" and "POLICY_CONDITION_FAILED" in d.reason_codes
     # UNKNOWN checks alone do not block approval
     d, iv = apply_guardrails(draft("APPROVE"), "PN-1", tools(LOW, policy_verification=PV_OK))
     assert d.decision == "APPROVE" and not iv

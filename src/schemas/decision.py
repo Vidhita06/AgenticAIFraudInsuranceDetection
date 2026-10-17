@@ -15,6 +15,8 @@ DECISION_ALIASES = {"REQUEST_MORE_INFO": "REQUEST_MORE_INFORMATION", "REQUEST_IN
 ToolName = Literal["validation", "fraud_score", "shap_explanation", "policy_retrieval", "policy_verification",
                    "similar_claims", "claim_history"]
 ToolStatus = Literal["completed", "partial", "unavailable", "failed", "not_run"]
+# Why a claim was flagged. Only FRAUD_RISK flags count as "fraud caught" in the evaluation.
+FlagCategory = Literal["FRAUD_RISK", "POLICY_CONDITION", "SYSTEM_FAILURE"]
 
 
 def normalize_decision(label: Any) -> str:
@@ -35,12 +37,14 @@ class DecisionDraft(BaseModel):
     rationale: str = Field(..., min_length=10)
     evidence: list[Evidence] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
+    flag_category: Optional[FlagCategory] = None    # set by the rule-based decision only
 
 
 class ToolStatusEntry(BaseModel):
     status: ToolStatus
     origin: Optional[str] = None          # orchestrator | agent | dependency | auto
     detail: Optional[str] = None
+    data_origin: Optional[str] = None     # "simulated reference data" when the output used it
 
 
 class TriageDecision(BaseModel):
@@ -50,6 +54,8 @@ class TriageDecision(BaseModel):
     investigation_id: Optional[str] = None
     investigation_status: Optional[str] = None
     decision: Decision
+    flag_category: Optional[FlagCategory] = None    # set for every FLAG_FOR_INVESTIGATION
+    simulated_data: bool = False                    # simulated reference data enabled for this run
     fraud_probability: Optional[float] = None
     risk_band: Optional[str] = None
     predicted_class: Optional[str] = None

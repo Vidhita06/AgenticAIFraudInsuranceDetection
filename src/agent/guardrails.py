@@ -1,18 +1,26 @@
 """Guardrails enforced in code (not only in the prompt):
 
 1. Only APPROVE / FLAG_FOR_INVESTIGATION / REQUEST_MORE_INFORMATION; never a denial.
-2. Any blocking validation failure forces REQUEST_MORE_INFORMATION.
+2. REQUEST_MORE_INFORMATION is only for claim-level problems: blocking validation (missing or
+   invalid fields) or a contradiction inside the claim record (PV02, PV04). Blocking
+   validation forces it; an LLM request for more information without such grounds is replaced
+   by the rule-based decision.
 3. A `high` risk band can never be APPROVE (it becomes FLAG_FOR_INVESTIGATION). A high score
    means "investigate", never "reject".
-4. APPROVE needs a completed fraud score and no policy-verification FAIL; otherwise the claim
-   needs more information (manual scoring, or clarification of the failed policy check).
+4. APPROVE needs a completed fraud score, every required tool to have run, a consistent claim
+   record and no policy-condition FAIL. Otherwise: claim-record contradiction ->
+   REQUEST_MORE_INFORMATION; missing score or failed tool -> FLAG (SYSTEM_FAILURE); policy
+   condition FAIL -> FLAG (POLICY_CONDITION).
+4b. Every FLAG carries a category: FRAUD_RISK, POLICY_CONDITION or SYSTEM_FAILURE. Only
+   FRAUD_RISK flags count as fraud caught in the evaluation.
 5. Every evidence fact must be traceable to the output of the tool it cites; untraceable
    facts are removed and logged. A tool that reported `unavailable` can only be cited for
    that limitation (so missing history is never presented as a clean history).
 6. If the LLM fails or returns invalid output twice, a deterministic rule-based decision
    is used (`rule_based_decision`).
 7. Reason codes, missing information, conflicts, tool statuses and findings are copied from
-   the evidence record (code), never taken from the LLM.
+   the evidence record (code), never taken from the LLM. Evidence drawn from simulated
+   reference data is labelled "(simulated reference data)".
 8. Everything is marked `requires_human_review = True`.
 """
 from __future__ import annotations
@@ -21,7 +29,8 @@ import json
 import re
 from typing import Any, Mapping
 
-from src.agent.evidence import aggregate_evidence, reason_codes
+from src.agent.evidence import (SIMULATED, aggregate_evidence, claim_level_grounds, failed_required, flag_category,
+                                pv_failures, reason_codes, uses_simulated)
 from src.schemas.decision import ALLOWED_DECISIONS, DecisionDraft, Evidence, TriageDecision, normalize_decision
 
 _NUM = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(%?)")
@@ -78,14 +87,23 @@ def is_grounded(fact: str, source_output: Any) -> tuple[bool, str]:
 # Rule-based fallback
 # ---------------------------------------------------------------------------
 
-def rule_based_decision(claim_id: str, tool_results: Mapping[str, Any], reason: str) -> DecisionDraft:
-    """Deterministic decision from tool outputs (used when the LLM is unavailable or fails)."""
+def rule_based_decision(claim_id: str, tool_results: Mapping[str, Any], reason: str,
+                        required: tuple[str, ...] = ()) -> DecisionDraft:
+    """Deterministic decision from tool outputs (used when the LLM is unavailable or fails).
+
+    blocking validation / claim-record contradiction -> REQUEST_MORE_INFORMATION
+    no fraud score or a failed required tool          -> FLAG (SYSTEM_FAILURE)
+    high risk band                                    -> FLAG (FRAUD_RISK)
+    policy-condition FAIL                             -> FLAG (POLICY_CONDITION)
+    otherwise                                         -> APPROVE
+    """
     v = tool_results.get("validation") or {}
     s = tool_results.get("fraud_score") or {}
     shap = tool_results.get("shap_explanation") or {}
     pv = tool_results.get("policy_verification") or {}
     sim = tool_results.get("similar_claims") or {}
     ch = tool_results.get("claim_history") or {}
+    claim_fails, policy_fails = pv_failures(pv)
     evidence: list[Evidence] = []
     if v.get("blocking"):
         failed = [r["rule_id"] for r in v.get("failed_rules", []) if r.get("severity") == "blocking"]
@@ -116,76 +134,124 @@ def rule_based_decision(claim_id: str, tool_results: Mapping[str, Any], reason: 
                                  fact=f"{sim['neighbour_frauds']} of {sim['k']} most similar past claims were fraudulent"))
     if ch.get("ok") and ch.get("status") == "unavailable":
         evidence.append(Evidence(source_tool="claim_history", fact="Claim history unavailable for this policy"))
-    if band == "high":
-        decision = "FLAG_FOR_INVESTIGATION"
+    elif ch.get("ok") and ch.get("history_available"):
+        evidence.append(Evidence(source_tool="claim_history",
+                                 fact=f"{ch.get('previous_claim_count')} previous claims in the look-back window"))
+    tool_fails = failed_required(tool_results, required)
+    category = None
+    if claim_fails:
+        decision = "REQUEST_MORE_INFORMATION"
+        text = (f"The claim record is internally inconsistent ({', '.join(claim_fails)}); the claimant needs to "
+                "clarify it before the claim can be assessed.")
+    elif not s.get("ok"):
+        decision, category = "FLAG_FOR_INVESTIGATION", "SYSTEM_FAILURE"
+        text = "The fraud score could not be computed, so the claim needs manual assessment."
+    elif band == "high":
+        decision, category = "FLAG_FOR_INVESTIGATION", "FRAUD_RISK"
         text = (f"The fraud model places this claim in the high risk band (probability {p}), which warrants "
                 "investigation; the score alone does not establish fraud.")
-    elif not s.get("ok"):
-        decision = "REQUEST_MORE_INFORMATION"
-        text = "The fraud score could not be computed, so the claim needs manual assessment."
-    elif pv.get("ok") and pv.get("failed_checks"):
-        decision = "REQUEST_MORE_INFORMATION"
-        text = (f"Policy verification failed ({', '.join(pv['failed_checks'])}); the claim needs clarification "
-                f"before it can be assessed. The fraud model places it in the {band} risk band (probability {p}).")
+    elif policy_fails:
+        decision, category = "FLAG_FOR_INVESTIGATION", "POLICY_CONDITION"
+        text = (f"Policy verification failed ({', '.join(policy_fails)}): a coverage question for an adjuster, "
+                f"not a fraud finding. The fraud model places the claim in the {band} risk band (probability {p}).")
+    elif tool_fails:
+        decision, category = "FLAG_FOR_INVESTIGATION", "SYSTEM_FAILURE"
+        text = f"Required checks failed to run ({', '.join(tool_fails)}), so the claim needs manual assessment."
     else:
         decision = "APPROVE"
         text = f"No blocking issues and the fraud model places the claim in the {band} risk band (probability {p})."
-    return DecisionDraft(decision=decision, rationale=f"{text} [Rule-based decision: {reason}]", evidence=evidence)
+    return DecisionDraft(decision=decision, rationale=f"{text} [Rule-based decision: {reason}]", evidence=evidence,
+                         flag_category=category)
 
 
 # ---------------------------------------------------------------------------
 # Apply all guardrails
 # ---------------------------------------------------------------------------
 
+def _label_simulated(ev: Evidence, output: Mapping[str, Any] | None) -> Evidence:
+    if uses_simulated(output) and SIMULATED not in ev.fact.lower():
+        suffix = f" ({SIMULATED})"
+        return Evidence(source_tool=ev.source_tool, fact=ev.fact[:400 - len(suffix)] + suffix)
+    return ev
+
+
 def apply_guardrails(draft: DecisionDraft | None, claim_id: str, tool_results: Mapping[str, Any],
                      decided_by: str = "llm", fallback_reason: str = "",
-                     record: Mapping[str, Any] | None = None) -> tuple[TriageDecision, list[dict]]:
+                     record: Mapping[str, Any] | None = None, required: tuple[str, ...] = (),
+                     simulated_data: bool = False) -> tuple[TriageDecision, list[dict]]:
     """Return the final TriageDecision and a list of intervention records for the audit log.
-    `record` is the evidence record from aggregate_evidence (built here if not given)."""
+    `record` is the evidence record from aggregate_evidence (built here if not given);
+    `required` lists the evidence sources that must have run before APPROVE."""
     if record is None:
-        record = aggregate_evidence("", claim_id, tool_results, {}, ("fraud_score",))
+        record = aggregate_evidence("", claim_id, tool_results, {}, required or ("fraud_score",))
     interventions: list[dict] = []
+    category = None
     if draft is None:
-        draft = rule_based_decision(claim_id, tool_results, fallback_reason or "no valid LLM output")
+        draft = rule_based_decision(claim_id, tool_results, fallback_reason or "no valid LLM output", required)
         decided_by = "rule_fallback"
         interventions.append({"guardrail": "fallback", "detail": fallback_reason or "no valid LLM output"})
 
     decision = normalize_decision(draft.decision)
     if decision not in ALLOWED_DECISIONS:
         interventions.append({"guardrail": "allowed_decisions", "detail": f"{draft.decision!r} is not allowed"})
-        fb = rule_based_decision(claim_id, tool_results, f"LLM proposed {draft.decision!r}")
-        decision, draft, decided_by = fb.decision, fb, "rule_fallback"
+        draft = rule_based_decision(claim_id, tool_results, f"LLM proposed {draft.decision!r}", required)
+        decision, decided_by = draft.decision, "rule_fallback"
+    if decided_by == "rule_fallback":
+        category = draft.flag_category
 
     v = tool_results.get("validation") or {}
     s = tool_results.get("fraud_score") or {}
-    pv = tool_results.get("policy_verification") or {}
+    grounds = claim_level_grounds(tool_results)
+    claim_fails, policy_fails = pv_failures(tool_results.get("policy_verification"))
+    tool_fails = failed_required(tool_results, required)
     if v.get("blocking") and decision != "REQUEST_MORE_INFORMATION":
         interventions.append({"guardrail": "blocking_validation", "detail": f"{decision} -> REQUEST_MORE_INFORMATION"})
-        decision = "REQUEST_MORE_INFORMATION"
+        decision, category = "REQUEST_MORE_INFORMATION", None
+    if decision == "REQUEST_MORE_INFORMATION" and not grounds:
+        fb = rule_based_decision(claim_id, tool_results, "more information requested without a claim-level reason",
+                                 required)
+        interventions.append({"guardrail": "request_info_not_claim_level",
+                              "detail": f"REQUEST_MORE_INFORMATION -> {fb.decision}"
+                                        + (f" ({fb.flag_category})" if fb.flag_category else "")})
+        decision, category = fb.decision, fb.flag_category
     if s.get("risk_band") == "high" and decision == "APPROVE":
         interventions.append({"guardrail": "high_risk_not_approve", "detail": "APPROVE -> FLAG_FOR_INVESTIGATION"})
-        decision = "FLAG_FOR_INVESTIGATION"
+        decision, category = "FLAG_FOR_INVESTIGATION", "FRAUD_RISK"
     if decision == "APPROVE" and not s.get("ok"):
         interventions.append({"guardrail": "approve_needs_score",
-                              "detail": "APPROVE -> REQUEST_MORE_INFORMATION (no fraud score)"})
+                              "detail": "APPROVE -> FLAG_FOR_INVESTIGATION (SYSTEM_FAILURE: no fraud score)"})
+        decision, category = "FLAG_FOR_INVESTIGATION", "SYSTEM_FAILURE"
+    if decision == "APPROVE" and claim_fails:
+        interventions.append({"guardrail": "approve_needs_consistent_claim",
+                              "detail": "APPROVE -> REQUEST_MORE_INFORMATION (" + ", ".join(claim_fails) + ")"})
         decision = "REQUEST_MORE_INFORMATION"
-    if decision == "APPROVE" and pv.get("ok") and pv.get("failed_checks"):
+    if decision == "APPROVE" and policy_fails:
         interventions.append({"guardrail": "approve_needs_policy_pass",
-                              "detail": "APPROVE -> REQUEST_MORE_INFORMATION (policy check FAIL: "
-                                        + ", ".join(pv["failed_checks"]) + ")"})
-        decision = "REQUEST_MORE_INFORMATION"
+                              "detail": "APPROVE -> FLAG_FOR_INVESTIGATION (POLICY_CONDITION: "
+                                        + ", ".join(policy_fails) + ")"})
+        decision, category = "FLAG_FOR_INVESTIGATION", "POLICY_CONDITION"
+    if decision == "APPROVE" and tool_fails:
+        interventions.append({"guardrail": "approve_needs_tools",
+                              "detail": "APPROVE -> FLAG_FOR_INVESTIGATION (SYSTEM_FAILURE: "
+                                        + ", ".join(tool_fails) + " failed)"})
+        decision, category = "FLAG_FOR_INVESTIGATION", "SYSTEM_FAILURE"
+    if decision == "FLAG_FOR_INVESTIGATION" and category is None:
+        category = flag_category(tool_results, required)
+    if decision != "FLAG_FOR_INVESTIGATION":
+        category = None
 
     kept: list[Evidence] = []
     for ev in draft.evidence:
         ok, why = is_grounded(ev.fact, tool_results.get(ev.source_tool))
         if ok:
-            kept.append(ev)
+            kept.append(_label_simulated(ev, tool_results.get(ev.source_tool)))
         else:
             interventions.append({"guardrail": "evidence_grounding", "detail": f"removed [{ev.source_tool}] "
                                   f"{ev.fact!r}: {why}"})
 
     notes = [f"{i['guardrail']}: {i['detail']}" for i in interventions]
-    adjusting = ("blocking_validation", "high_risk_not_approve", "approve_needs_score", "approve_needs_policy_pass")
+    adjusting = ("blocking_validation", "request_info_not_claim_level", "high_risk_not_approve", "approve_needs_score",
+                 "approve_needs_consistent_claim", "approve_needs_policy_pass", "approve_needs_tools")
     rationale = draft.rationale
     if any(i["guardrail"] in adjusting for i in interventions):
         rationale += " [Decision adjusted by guardrails: " + "; ".join(
@@ -194,7 +260,8 @@ def apply_guardrails(draft: DecisionDraft | None, claim_id: str, tool_results: M
     f = record.get("findings") or {}
     final = TriageDecision(
         claim_id=claim_id, investigation_id=record.get("investigation_id") or None,
-        investigation_status=record.get("investigation_status"), decision=decision,
+        investigation_status=record.get("investigation_status"), decision=decision, flag_category=category,
+        simulated_data=bool(simulated_data),
         fraud_probability=s.get("fraud_probability"), risk_band=s.get("risk_band"),
         predicted_class=s.get("predicted_class"),
         reason_codes=reason_codes(decision, record, tool_results),

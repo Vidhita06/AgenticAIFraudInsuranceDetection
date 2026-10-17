@@ -33,6 +33,8 @@ How to plan:
   arguments.
 - Some tools report `partial` or `unavailable` (for example, no policy document or no linked
   claim history). That is missing information, not a finding. Do not retry those tools.
+- Some outputs are marked `source: "simulated reference data"`. They are prototype data
+  (simulated policies, illustrative clauses, simulated prior claims), not real records.
 - When you have enough evidence, stop calling tools and reply with one short sentence on what
   you found. Do not write the final decision; a separate step does that.
 

@@ -1,0 +1,100 @@
+# SIMULATED policy clauses for the simulated reference database (docs/simulated_data_plan.md).
+#
+# Illustrative wording written by the project team. These are NOT real insurance terms and
+# were not derived from the claim data or its fraud labels. They give Tools 3 and 4 policy
+# text to work with in the prototype; every tool output that uses them is marked
+# "simulated reference data".
+#
+# Fields
+#   id         stable clause id (cited in verification checks)
+#   coverage   base policies the clause belongs to (Liability, Collision, All Perils)
+#   category   coverage | condition | exclusion | reporting | limit
+#   title      short name
+#   wording    the clause text
+#   test       how Tool 4 checks it against the claim (omit = wording only, not a check):
+#                term_contains_accident   accident date inside the current policy term
+#                reporting_within_days    reporting lag (days) <= `days`
+#                deductible_matches       claim deductible == scheduled deductible
+#                vehicle_category_matches claim VehicleCategory == insured vehicle category
+#                field_not_in             claim field `field` not in `values`
+#                unknown                  cannot be checked with the recorded fields (`reason`)
+#
+# Reporting deadline: 60 days for every coverage. A 30-day deadline was measured first and
+# failed 5.3% (Collision) and 7.8% (All Perils) of real validation claims, using the most
+# conservative lag the week-level dates allow (see docs/report/03_agent_evaluation.md).
+version: 1
+wording_note: illustrative wording written by the project team
+clauses:
+  - id: SIM-ALL-01
+    coverage: [Liability, Collision, All Perils]
+    category: condition
+    title: Incident within the policy term
+    wording: Cover applies only to incidents that occur while the policy term shown in the schedule is in force.
+    test: {type: term_contains_accident}
+
+  - id: SIM-ALL-02
+    coverage: [Liability, Collision, All Perils]
+    category: condition
+    title: Insured vehicle
+    wording: Cover applies only to the vehicle category described in the schedule.
+    test: {type: vehicle_category_matches}
+
+  - id: SIM-ALL-03
+    coverage: [Liability, Collision, All Perils]
+    category: limit
+    title: Deductible
+    wording: The deductible shown in the schedule is borne by the policyholder for each claim.
+    test: {type: deductible_matches}
+
+  - id: SIM-ALL-04
+    coverage: [Liability, Collision, All Perils]
+    category: reporting
+    title: Reporting deadline
+    wording: Every incident must be reported to the insurer within 60 days of the date it occurred.
+    test: {type: reporting_within_days, days: 60}
+
+  - id: SIM-ALL-05
+    coverage: [Liability, Collision, All Perils]
+    category: limit
+    title: Limits of cover
+    wording: The insurer's payment for any one claim will not exceed the limits shown in the schedule.
+    test: {type: unknown, reason: "The claim amount is not recorded, so the limits cannot be checked."}
+
+  - id: SIM-LIA-01
+    coverage: [Liability]
+    category: coverage
+    title: Third-party liability
+    wording: Covers the policyholder's legal liability for injury to other people and damage to their property.
+
+  - id: SIM-LIA-02
+    coverage: [Liability]
+    category: exclusion
+    title: Own vehicle damage
+    wording: Damage to the insured vehicle itself is not covered under a Liability policy.
+    test: {type: unknown, reason: "The claim does not record whose property was damaged."}
+
+  - id: SIM-COL-01
+    coverage: [Collision]
+    category: coverage
+    title: Collision damage
+    wording: Covers damage to the insured vehicle caused by a collision with another vehicle or object, whoever is at fault.
+
+  - id: SIM-COL-02
+    coverage: [Collision, All Perils]
+    category: condition
+    title: Driver age recorded
+    wording: The age of the policyholder must be recorded for vehicle-damage cover to apply.
+    test: {type: field_not_in, field: Age, values: [0]}
+
+  - id: SIM-AP-01
+    coverage: [All Perils]
+    category: coverage
+    title: All perils
+    wording: Covers collision damage plus fire, theft, storm, flood and vandalism to the insured vehicle.
+
+  - id: SIM-AP-02
+    coverage: [All Perils]
+    category: exclusion
+    title: Wear and mechanical failure
+    wording: Wear and tear, mechanical or electrical breakdown and gradual deterioration are not covered.
+    test: {type: unknown, reason: "The claim does not record the cause or peril of the loss."}

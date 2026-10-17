@@ -49,18 +49,28 @@ EXPLAIN = lambda claim, top_k=5, fraud_score=None: {
     "ok": True, "status": "completed", "top_factors": [{"feature": "fault", "value": "Policy Holder", "shap_value": 0.3476,
                                                         "direction": "increases fraud score"}],
     "positive_factors": ["fault"], "negative_factors": []}
-RETRIEVE = lambda claim: {"ok": True, "status": "partial", "policy_id": "PN-1", "document_found": False,
+RETRIEVE = lambda claim, **kw: {"ok": True, "status": "partial", "policy_id": "PN-1", "document_found": False,
                           "document_lookup": "no policy document store", "missing_information": ["policy version"]}
 
 
 def verify_stub(fail=False):
-    def f(claim, policy=None):
+    """fail: False, "claim" (PV04 claim-record contradiction) or "policy" (SIM-ALL-04 deadline)."""
+    failing = {"claim": "PV04_CLAIM_TIMELINE", "policy": "SIM-ALL-04", True: "PV04_CLAIM_TIMELINE"}.get(fail)
+
+    def f(claim, policy=None, **kw):
         assert policy is not None and policy.get("ok"), "retrieval must run first"
-        checks = [{"check_id": "PV04_CLAIM_TIMELINE", "result": "FAIL" if fail else "PASS", "reason": "timeline"},
-                  {"check_id": "PV08_COVERAGE_LIMITS", "result": "UNKNOWN", "reason": "no amount"}]
-        return {"ok": True, "status": "completed", "overall_result": "FAIL" if fail else "UNKNOWN",
-                "counts": {"PASS": 0 if fail else 1, "FAIL": int(fail), "UNKNOWN": 1}, "checks": checks,
-                "failed_checks": ["PV04_CLAIM_TIMELINE"] if fail else [], "unknown_checks": ["PV08_COVERAGE_LIMITS"]}
+        checks = [{"check_id": c, "level": "claim_record" if c.startswith("PV04") else "policy_condition",
+                   "result": "FAIL" if c == failing else "PASS", "reason": "check"}
+                  for c in ("PV04_CLAIM_TIMELINE", "SIM-ALL-04")]
+        checks.append({"check_id": "PV08_COVERAGE_LIMITS", "level": "policy_condition", "result": "UNKNOWN",
+                       "reason": "no amount"})
+        fails = [c for c in checks if c["result"] == "FAIL"]
+        return {"ok": True, "status": "completed", "overall_result": "FAIL" if fails else "UNKNOWN",
+                "counts": {"PASS": 2 - len(fails), "FAIL": len(fails), "UNKNOWN": 1}, "checks": checks,
+                "failed_checks": [c["check_id"] for c in fails],
+                "claim_record_failures": [c["check_id"] for c in fails if c["level"] == "claim_record"],
+                "policy_condition_failures": [c["check_id"] for c in fails if c["level"] == "policy_condition"],
+                "unknown_checks": ["PV08_COVERAGE_LIMITS"]}
     return f
 
 
@@ -69,7 +79,7 @@ SIM = lambda claim, k=5, same_base_policy=False: {
     "historical_base_rate": 0.0599,
     "neighbours": [{"claim_id": f"PN-{i}", "policy_number": i, "similarity": 0.9, "fraud_label": int(i < 3)}
                    for i in (1, 2, 3)]}
-HISTORY = lambda claim, years=5: {"ok": True, "status": "unavailable", "history_available": False,
+HISTORY = lambda claim, years=5, **kw: {"ok": True, "status": "unavailable", "history_available": False,
                                   "previous_claim_count": None, "previous_claims": [],
                                   "limitation": "No authorised claim-history source is configured."}
 
@@ -100,13 +110,13 @@ def test_approve_path(sample_claims):
     nodes = [t["node"] for t in trace]
     assert nodes[:3] == ["ingest", "validate", "score"] and "tools" in nodes
     assert nodes[-4:] == ["complete_investigation", "aggregate_evidence", "synthesize", "guardrails"]
-    assert auto_tools(trace) == ["explain_fraud_score"]           # required, not called by the agent
+    assert auto_tools(trace) == ["explain_fraud_score", "find_similar_claims"]   # required, not called by the agent
     assert d.investigation_id == f"INV-{tid}" and d.investigation_status == "complete"
-    assert {"LOW_MODEL_RISK", "POLICY_TERMS_UNVERIFIED", "NO_MATERIAL_CONCERNS"} <= set(d.reason_codes)
+    assert {"LOW_MODEL_RISK", "POLICY_TERMS_UNVERIFIED"} <= set(d.reason_codes) and d.flag_category is None
     st = {k: (v.status, v.origin) for k, v in d.tool_statuses.items()}
     assert st["policy_verification"] == ("completed", "agent") and st["policy_retrieval"] == ("partial", "dependency")
     assert st["fraud_score"] == ("completed", "orchestrator") and st["shap_explanation"] == ("completed", "auto")
-    assert st["similar_claims"] == ("not_run", None) and st["claim_history"] == ("not_run", None)
+    assert st["similar_claims"] == ("completed", "auto") and st["claim_history"] == ("not_run", None)
 
 
 def test_flag_path_with_all_agent_tools(sample_claims):
@@ -119,6 +129,7 @@ def test_flag_path_with_all_agent_tools(sample_claims):
                band="high", p=0.4123)
     tid, d, trace = r.run_claim(sample_claims[1])
     assert d.decision == "FLAG_FOR_INVESTIGATION" and len(d.evidence) == 4 and not d.guardrail_notes
+    assert d.flag_category == "FRAUD_RISK"
     assert d.similar_claim_ids == ["PN-1", "PN-2", "PN-3"]
     assert agent_calls(trace) == ["find_similar_claims", "verify_policy", "explain_fraud_score", "get_claim_history"]
     assert auto_tools(trace) == []
@@ -143,13 +154,22 @@ def test_request_more_information_overrides_llm_approve(sample_claims):
     assert "BLOCKING_VALIDATION" in d.reason_codes
 
 
-def test_policy_fail_blocks_approval(sample_claims):
-    r = runner(scripted(tool_call("verify_policy"), AIMessage(content="done"), answer("APPROVE")), fail=True)
+def test_claim_record_contradiction_requests_information(sample_claims):
+    r = runner(scripted(tool_call("verify_policy"), AIMessage(content="done"), answer("APPROVE")), fail="claim")
     tid, d, _ = r.run_claim(sample_claims[0])
-    assert d.decision == "REQUEST_MORE_INFORMATION"
-    assert any(n.startswith("approve_needs_policy_pass") for n in d.guardrail_notes)
+    assert d.decision == "REQUEST_MORE_INFORMATION" and d.flag_category is None
+    assert any(n.startswith("approve_needs_consistent_claim") for n in d.guardrail_notes)
     assert d.policy_findings["verification"]["failed"][0]["check_id"] == "PV04_CLAIM_TIMELINE"
-    assert d.conflicting_evidence            # low band but a policy FAIL
+    assert "CLAIM_RECORD_CONTRADICTION" in d.reason_codes
+
+
+def test_policy_condition_fail_is_a_policy_flag_not_fraud(sample_claims):
+    r = runner(scripted(tool_call("verify_policy"), AIMessage(content="done"), answer("APPROVE")), fail="policy")
+    tid, d, _ = r.run_claim(sample_claims[0])
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "POLICY_CONDITION"
+    assert any(n.startswith("approve_needs_policy_pass") for n in d.guardrail_notes)
+    assert "POLICY_CONDITION_FAILED" in d.reason_codes
+    assert d.conflicting_evidence            # low band but a policy-condition FAIL
 
 
 def test_incomplete_claim_is_not_scored_and_requests_info(sample_claims):
@@ -199,7 +219,9 @@ def test_unresolved_questions_are_kept(sample_claims):
     msg = AIMessage(content=json.dumps({"decision": "REQUEST_MORE_INFO", "rationale": "Policy dates are unknown here.",
                                         "evidence": [], "unresolved_questions": ["What are the policy's validity dates?"]}))
     tid, d, _ = runner(scripted(AIMessage(content="ok"), msg)).run_claim(sample_claims[0])
-    assert d.decision == "REQUEST_MORE_INFORMATION" and d.unresolved_questions == ["What are the policy's validity dates?"]
+    assert d.unresolved_questions == ["What are the policy's validity dates?"]
+    # no claim-level reason for more information: the rule-based decision replaces it
+    assert d.decision == "APPROVE" and any(n.startswith("request_info_not_claim_level") for n in d.guardrail_notes)
 
 
 def test_max_steps_cutoff(sample_claims):
@@ -273,11 +295,57 @@ def test_run_batch_records_usage_cost_and_model_only_decision(sample_claims, tmp
     assert len(df) == 2 and set(df.label) == {0, 1}
     s = ae.summarize(df)
     dq = s["decision_quality"].set_index(["policy", "metric"])
-    assert dq.loc[("agent", "fraud -> FLAG (recall)"), "rate"] == 1.0
-    assert dq.loc[("model-only threshold policy", "fraud -> FLAG (recall)"), "rate"] == 0.0
+    assert dq.loc[("agent", "fraud -> FRAUD_RISK flag (recall)"), "rate"] == 1.0
+    assert dq.loc[("model-only threshold policy", "fraud -> FRAUD_RISK flag (recall)"), "rate"] == 0.0
+    assert recs[1]["flag_category"] == "FRAUD_RISK" and recs[0]["flag_category"] is None
     assert s["process"]["tool_use_rate"]["find_similar_claims"] == 0.5
     path = ae.write_report(s, tmp_path / "report.md", "Test report", {"model": "fake"})
     assert "Decision quality" in path.read_text()
+
+
+def _rows(mode_on, decisions):
+    rows = []
+    for pn, (label, dec, cat, checks) in enumerate(decisions, 1):
+        rows.append({"policy_number": pn, "run_index": 0, "label": label, "decision": dec, "flag_category": cat,
+                     "model_only_decision": "APPROVE", "model_only_flag_category": None, "decided_by": "llm",
+                     "tools_called": [], "auto_tools": [], "reason_codes": [], "conflicting_evidence": [],
+                     "interventions": [], "grounding_removed": 0, "n_evidence": 1, "agent_steps": 1,
+                     "max_steps_reached": False, "llm_failures": 0, "latency_s": 1.0, "input_tokens": 0,
+                     "output_tokens": 0, "cost_usd": 0.0, "error": None, "simulated_data": mode_on,
+                     "policy_checks": checks, "history_status": "completed" if mode_on else "unavailable",
+                     "history_count": 2 if mode_on else None, "claim_id": f"PN-{pn}"})
+    return pd.DataFrame(rows)
+
+
+def test_policy_flags_are_not_fraud_caught():
+    df = _rows(True, [(1, "FLAG_FOR_INVESTIGATION", "POLICY_CONDITION", {"SIM-ALL-04": "FAIL"}),
+                      (1, "FLAG_FOR_INVESTIGATION", "FRAUD_RISK", {}),
+                      (0, "FLAG_FOR_INVESTIGATION", "SYSTEM_FAILURE", {}), (0, "APPROVE", None, {})])
+    dq = ae.decision_quality(df).set_index(["policy", "metric"])
+    assert dq.loc[("agent", "fraud -> FRAUD_RISK flag (recall)"), "rate"] == 0.5
+    assert dq.loc[("agent", "legit -> FRAUD_RISK flag (false-flag rate)"), "rate"] == 0.0
+    assert dq.loc[("agent", "POLICY_CONDITION flags (all claims)"), "k"] == 1
+    assert dq.loc[("agent", "SYSTEM_FAILURE flags (all claims)"), "k"] == 1
+    assert dq.loc[("agent", "FRAUD_RISK flag precision (sample)"), "rate"] == 1.0
+
+
+def test_mode_comparison_report(tmp_path):
+    off = _rows(False, [(1, "FLAG_FOR_INVESTIGATION", "FRAUD_RISK", {}), (0, "APPROVE", None, {}),
+                        (0, "APPROVE", None, {})])
+    on = _rows(True, [(1, "FLAG_FOR_INVESTIGATION", "FRAUD_RISK", {"SIM-ALL-04": "PASS"}),
+                      (0, "FLAG_FOR_INVESTIGATION", "POLICY_CONDITION", {"SIM-ALL-04": "FAIL"}),
+                      (0, "APPROVE", None, {"SIM-ALL-04": "PASS"})])
+    cmp = ae.compare_modes({"off": off, "on": on})
+    t = cmp["decision_quality"].set_index("metric")
+    assert t.loc["POLICY_CONDITION flags (all claims)", "Δ (on − off)"] == pytest.approx(1 / 3)
+    assert t.loc["fraud -> FRAUD_RISK flag (recall)", "Δ (on − off)"] == 0
+    assert list(cmp["changed"].policy_number) == [2] and "SIM-ALL-04" in cmp["changed"].cause.iloc[0]
+    assert cmp["policy_checks"]["on"].set_index("check").loc["SIM-ALL-04", "FAIL"] == 1
+    path = ae.write_report(None, tmp_path / "r.md", "T", {"model": "x"},
+                           mode_summaries={m: ae.summarize(d) for m, d in (("off", off), ("on", on))},
+                           comparison=cmp)
+    text = path.read_text()
+    assert "off vs on" in text and "Caveat" in text and "FRAUD_RISK flags only" in text
 
 
 def test_consistency_and_manual_review(tmp_path):
@@ -411,7 +479,7 @@ def test_ollama_native_tool_calls_end_to_end(sample_claims):
     assert synth_req.get("format") == "json" and not synth_req.get("tools")      # no tools offered
     assert agent_calls(trace) == ["find_similar_claims"]
     # the model never called the required tools: complete_investigation ran them
-    assert auto_tools(trace) == ["explain_fraud_score", "retrieve_policy", "verify_policy"]
+    assert auto_tools(trace) == ["explain_fraud_score", "retrieve_policy", "verify_policy"]   # similar was called
 
 
 def test_ollama_tool_call_written_as_text_is_recovered(sample_claims):

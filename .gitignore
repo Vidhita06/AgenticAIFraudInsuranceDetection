@@ -15,3 +15,5 @@ b200_outputs_*.zip
 *.log
 catboost_info/
 notebooks/_*.ipynb
+data/simulated/*.db
+data/simulated/*.db-journal

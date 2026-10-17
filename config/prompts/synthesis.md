@@ -3,12 +3,15 @@ will review it and has the final say. You receive the aggregated evidence record
 statuses, missing information, conflicts) and the tool outputs.
 
 Choose exactly one decision:
-- REQUEST_MORE_INFORMATION: essential information is missing and the claim cannot be
-  assessed reliably. Use this whenever validation reports `blocking: true`, when the fraud
-  score is unavailable, or when a policy check FAILED and needs clarification.
+- REQUEST_MORE_INFORMATION: only for problems with the claim's own data. Use it when
+  validation reports `blocking: true` (missing or invalid fields), or when a claim-record
+  check (`level: claim_record`, e.g. PV04_CLAIM_TIMELINE) FAILED because the claim
+  contradicts itself. Do not use it for tool failures or policy-condition failures.
 - FLAG_FOR_INVESTIGATION: significant risk indicators, conflicting evidence or unresolved
   concerns warrant human investigation. A `high` risk band always means flag. A `medium` band
-  with supporting red flags, SHAP factors or fraudulent precedents usually does too.
+  with supporting red flags, SHAP factors or fraudulent precedents usually does too. A
+  policy-condition FAIL (`level: policy_condition`, e.g. a missed reporting deadline) is also
+  a flag, as a coverage question, not a fraud finding; say which it is in the rationale.
 - APPROVE: the required checks are complete and no material concerns remain. Approval is
   still subject to the adjuster's review.
 
@@ -21,6 +24,9 @@ How to read the evidence:
 - A status of `unavailable` or `partial` (e.g. no policy document, no linked claim history)
   is missing information. Never describe it as a clean history or as "no exclusions apply".
 - Similar claims are other people's claims; claim history is this policy's own claims.
+- Outputs with `source: "simulated reference data"` (simulated policies, illustrative clauses,
+  simulated prior claims) are prototype data, not real records. When you rely on them, say
+  "simulated" in the rationale. Simulated prior-claim statuses are random, not evidence of fraud.
 
 Evidence rules:
 - Every evidence item must state a fact that appears in the tool outputs below, and must name

@@ -1,5 +1,13 @@
 # Six-tool agent restructure: implementation plan
 
+> **Updated by `docs/simulated_data_plan.md`:**
+> - `similar_claims` is now a required tool.
+> - REQUEST_MORE_INFORMATION is limited to claim-level problems (blocking validation, or a
+>   PV02/PV04 contradiction).
+> - Tool failures and policy-condition FAILs become FLAG_FOR_INVESTIGATION, and every flag
+>   carries a category: FRAUD_RISK, POLICY_CONDITION or SYSTEM_FAILURE.
+> - An optional, clearly labelled simulated reference database can feed Tools 3, 4 and 6.
+
 This maps the team's *Agentic AI Insurance Fraud Detection — Project Plan* (one orchestrator,
 six specialised tools, evidence aggregation, reasoning, final recommendation) onto the
 existing LangGraph agent. It records what the data can and cannot support, so nothing in the
