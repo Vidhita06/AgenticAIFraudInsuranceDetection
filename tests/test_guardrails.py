@@ -236,7 +236,9 @@ def test_medium_band_alone_does_not_justify_a_fraud_flag():
     assert "MEDIUM_MODEL_RISK" in d.reason_codes
 
 
-def test_medium_band_flag_with_a_concrete_factor_is_kept():
+def test_medium_band_model_features_are_context_not_triggers():
+    """Warning red flags, fraud among similar claims and strong SHAP drivers are model features:
+    they stay in the reason codes (context) but no longer keep a medium-band flag."""
     base = tools(MEDIUM, policy_verification=PV_UNKNOWN, claim_history=HIST_UNAVAILABLE, similar_claims=SIM_NONE)
     shap = {"ok": True, "top_factors": [{"feature": "accident month", "value": "Mar", "shap_value": 0.61},
                                         {"feature": "red-flag score", "value": 2.0, "shap_value": 1.9}]}
@@ -246,12 +248,31 @@ def test_medium_band_flag_with_a_concrete_factor_is_kept():
              "STRONG_SHAP_DRIVER": {"shap_explanation": shap}}
     for code, extra in cases.items():
         d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, **extra})
-        assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "FRAUD_RISK" and not iv, code
-        assert code in d.reason_codes
-    # a policy-condition FAIL keeps the flag, but as a coverage question, not fraud
-    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, "policy_verification": PV_POLICY_FAIL})
-    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "POLICY_CONDITION"
-    # the red-flag score alone is not a "strong SHAP driver" (it drives every medium score)
-    rf_only = {"ok": True, "top_factors": [{"feature": "red-flag score", "value": 2.0, "shap_value": 1.9}]}
-    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, "shap_explanation": rf_only})
-    assert d.decision == "APPROVE"
+        assert d.decision == "APPROVE" and iv[0]["guardrail"] == "unsupported_fraud_flag", code
+        assert code in d.reason_codes, code                  # still reported as context
+
+
+def test_medium_band_flags_need_information_the_model_does_not_see():
+    base = tools(MEDIUM, policy_verification=PV_UNKNOWN, claim_history=HIST_UNAVAILABLE, similar_claims=SIM_NONE)
+    # policy-condition FAIL: kept, as a coverage question (POLICY_CONDITION), even with a red flag
+    tr = {**base, "policy_verification": PV_POLICY_FAIL, "fraud_score": {**MEDIUM, "risk_indicators": FLAGS}}
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", tr)
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "POLICY_CONDITION" and not iv
+    # history source lists more prior claims than the claim reports: FRAUD_RISK
+    hist = {"ok": True, "status": "completed", "history_available": True, "previous_claim_count": 3,
+            "recorded_summary": {"fields": {"PastNumberOfClaims": "none"}}}
+    d, iv = apply_guardrails(draft("FLAG_FOR_INVESTIGATION"), "PN-1", {**base, "claim_history": hist})
+    assert d.decision == "FLAG_FOR_INVESTIGATION" and d.flag_category == "FRAUD_RISK" and not iv
+    assert "HISTORY_CONTRADICTION" in d.reason_codes and any("lists 3 previous" in c for c in d.conflicting_evidence)
+
+
+def test_history_contradiction_only_for_under_reported_claims():
+    from src.agent.evidence import history_contradiction
+    def h(found, reported):
+        return {"claim_history": {"ok": True, "status": "completed", "history_available": True,
+                                  "previous_claim_count": found,
+                                  "recorded_summary": {"fields": {"PastNumberOfClaims": reported}}}}
+    assert history_contradiction(h(1, "none")) and history_contradiction(h(5, "2 to 4"))
+    assert not history_contradiction(h(0, "2 to 4"))         # fewer found: the source may cover less time
+    assert not history_contradiction(h(9, "more than 4")) and not history_contradiction(h(1, "1"))
+    assert not history_contradiction({"claim_history": HIST_UNAVAILABLE})

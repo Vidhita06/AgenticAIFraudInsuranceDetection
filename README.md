@@ -237,17 +237,15 @@ With `enabled: false` (the default) the tools behave exactly as without it.
   - If a FRAUD_RISK flag's reason codes are all low-risk or systemic ones, the guardrail
     replaces it with the rule-based decision (`unsupported_fraud_flag`).
   - The synthesis prompt gives a worked example of such a claim being approved.
-- **A medium band alone never justifies a fraud flag.** A medium-band FRAUD_RISK flag needs a
-  concrete factor (`agent.medium_band_concrete_factors`):
-  - a warning-level red flag;
-  - a policy-condition FAIL;
-  - fraud among the similar claims;
-  - a strong non-red-flag SHAP driver;
-  - conflicting evidence.
+- **In the medium band, only information the fraud model does not see can justify a flag**
+  (`agent.medium_band_concrete_factors`):
+  - a policy-condition FAIL, tagged POLICY_CONDITION, not FRAUD_RISK;
+  - a claim-record contradiction (→ REQUEST_MORE_INFORMATION);
+  - a claim-history contradiction: the history lists more prior claims than the claim reports.
 
-  Otherwise the guardrail replaces it (`unsupported_fraud_flag`). On validation, 26% of
-  medium-band claims have such a factor, and their fraud rate is no higher than the rest:
-  `docs/report/03b_medium_band_factors.md`.
+  Red flags, SHAP drivers and similar-claim fraud are model features, so they appear only as
+  context in the rationale. On validation they don't separate fraud in the medium band: 4 frauds
+  among the 71 claims with one. See `docs/report/03b_medium_band_factors.md`.
 
 Without an API key the agent still runs and returns the rule-based decision.
 `pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and

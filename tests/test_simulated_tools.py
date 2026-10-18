@@ -127,3 +127,11 @@ def test_pn_5736_low_band_with_data_gaps_is_approved(vector_store):
                                    "SIMILAR_CLAIMS_NO_FRAUD", "NO_MATERIAL_CONCERNS"}
     assert d.decision == "APPROVE" and d.flag_category is None and d.decided_by == "llm"
     assert any(n.startswith("unsupported_fraud_flag") for n in d.guardrail_notes)
+
+
+def test_simulated_history_never_contradicts_the_claim(sample_claims, simulated_db):
+    """Simulated prior-claim counts follow PastNumberOfClaims by construction, so the history
+    contradiction (a medium-band flag trigger) can only come from a real history source."""
+    from src.agent.evidence import history_contradiction
+    for claim in sample_claims[:4]:
+        assert history_contradiction({"claim_history": get_claim_history(claim, simulated=True)}) is None

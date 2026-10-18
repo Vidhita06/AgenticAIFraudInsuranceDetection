@@ -25,7 +25,10 @@ from src.ml.predict import load_artifacts, predict_proba, risk_band  # noqa: E40
 from src.tools import explain_claim, find_similar_claims, score_claim, verify_policy  # noqa: E402
 
 FACTORS = ["RED_FLAGS_PRESENT", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD", "STRONG_SHAP_DRIVER",
-           "CONFLICTING_EVIDENCE"]
+           "CONFLICTING_EVIDENCE", "CLAIM_RECORD_CONTRADICTION", "HISTORY_CONTRADICTION"]
+# The first factor list tried (model features + policy/conflict); kept to document why it was replaced.
+PREVIOUS_FACTORS = {"RED_FLAGS_PRESENT", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD",
+                    "STRONG_SHAP_DRIVER", "CONFLICTING_EVIDENCE"}
 
 
 def rate(k: int, n: int) -> str:
@@ -53,7 +56,8 @@ def main() -> None:
             codes = set(reason_codes("FLAG_FOR_INVESTIGATION", {"conflicts": find_conflicts(t)}, t))
             for f in FACTORS:
                 row[f"{f} ({mode})"] = f in codes
-            row[f"any concrete factor ({mode})"] = bool(codes & concrete_factor_codes())
+            row[f"previous factor list ({mode})"] = bool(codes & PREVIOUS_FACTORS)
+            row[f"current factor list ({mode})"] = bool(codes & concrete_factor_codes())
         rows.append(row)
     d = pd.DataFrame(rows)
     table = []
@@ -75,24 +79,35 @@ def main() -> None:
            "|---|---|---|---|---|"]
     md += [f"| {x['factor']} | {x['claims with']} | {x['share']} | {x['fraud rate with [95% CI]']} | "
            f"{x['fraud rate without [95% CI]']} |" for x in table]
-    any_off = d["any concrete factor (off)"]
+    any_off = d["previous factor list (off)"]
     k1, n1, k0, n0 = int(d.label[any_off].sum()), int(any_off.sum()), int(d.label[~any_off].sum()), int((~any_off).sum())
     lo1, hi1 = wilson_ci(k1, n1) if n1 else (0, 0)
     lo0, hi0 = wilson_ci(k0, n0) if n0 else (0, 0)
     verdict = ("higher" if n1 and n0 and lo1 > hi0 else "not higher" if n1 and n0 and k1 / n1 <= k0 / n0
                else "not clearly different")
+    cur = {m: int(d[f"current factor list ({m})"].sum()) for m in ("off", "on") if f"current factor list ({m})" in d}
     md += ["", "## Reading", "",
-           f"- Medium-band claims with a concrete factor (simulated data off): fraud rate {k1}/{n1}"
+           f"- Medium-band claims with a factor from the previous list (warning red flag, policy FAIL, similar-claim "
+           f"fraud, strong SHAP driver, conflict; simulated data off): fraud rate {k1}/{n1}"
            f"{f' = {k1 / n1:.1%}' if n1 else ''}; without: {k0}/{n0}{f' = {k0 / n0:.1%}' if n0 else ''}. "
            f"The rate with a factor is **{verdict}** (95% intervals "
            f"[{lo1:.1%}, {hi1:.1%}] vs [{lo0:.1%}, {hi0:.1%}]).",
            "- The red flags and the red-flag score are model features, so once a claim's score falls in the "
            "medium band they carry little extra information; every medium-band claim has at least one "
            "red flag and a positive red-flag-score SHAP contribution.",
-           "- So the factors are a requirement for an *explainable* flag (an adjuster can check them), "
-           "not a proven way to find more fraud inside the medium band. With "
-           f"{int(bands.loc['medium', 'sum'])} frauds the intervals are wide; the live evaluation reports "
-           "FRAUD_RISK flags by risk band with their fraud rate, which shows whether the agent's medium-band flags add value."]
+           f"- With {int(bands.loc['medium', 'sum'])} frauds the intervals are wide; the live evaluation reports "
+           "FRAUD_RISK flags by risk band with their fraud rate.",
+           "",
+           "## Decision",
+           "",
+           f"Because these model-derived factors do not separate fraud inside the medium band, flagging the "
+           f"{n1} claims that have one would be cost-negative at the 10:1 cost ratio (~{k1} frauds for ~{n1 - k1} "
+           "false flags), so the medium-band flag triggers (`agent.medium_band_concrete_factors`) are now limited "
+           "to information the model does not see — a policy-condition FAIL (tagged POLICY_CONDITION, not "
+           "FRAUD_RISK), a claim-record contradiction, or a claim-history contradiction — while red flags, SHAP "
+           "drivers and similar-claim fraud remain in the rationale as context only. "
+           f"Medium-band validation claims with a current trigger: {cur.get('off', 0)} with simulated data off, "
+           f"{cur.get('on', '–')} with it on."]
     out = ROOT / "docs" / "report" / "03b_medium_band_factors.md"
     out.write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md))

@@ -15,7 +15,7 @@ DONE = ("completed", "partial", "unavailable")
 REASON_CODES = (
     "BLOCKING_VALIDATION", "CLAIM_RECORD_CONTRADICTION", "HIGH_MODEL_RISK", "MEDIUM_MODEL_RISK", "LOW_MODEL_RISK",
     "MODEL_SCORE_UNAVAILABLE", "RED_FLAGS_PRESENT", "POLICY_CONDITION_FAILED", "POLICY_TERMS_UNVERIFIED",
-    "SIMILAR_CLAIMS_ELEVATED_FRAUD", "SIMILAR_CLAIMS_NO_FRAUD", "STRONG_SHAP_DRIVER", "CLAIM_HISTORY_UNAVAILABLE", "CONFLICTING_EVIDENCE",
+    "SIMILAR_CLAIMS_ELEVATED_FRAUD", "SIMILAR_CLAIMS_NO_FRAUD", "STRONG_SHAP_DRIVER", "HISTORY_CONTRADICTION", "CLAIM_HISTORY_UNAVAILABLE", "CONFLICTING_EVIDENCE",
     "TOOL_FAILURE", "INCOMPLETE_INVESTIGATION", "SIMULATED_DATA_USED", "NO_MATERIAL_CONCERNS",
 )
 CLAIM_RECORD_CHECKS = ("PV02_POLICY_TYPE_CONSISTENT", "PV04_CLAIM_TIMELINE")
@@ -52,11 +52,35 @@ def _agent_setting(key: str, default: Any) -> Any:
     return (load_config().get("agent") or {}).get(key, default)
 
 
+# Information the fraud model does NOT see. Red flags, SHAP drivers and similar-claim fraud are
+# built from the model's own features and do not separate fraud inside the medium band
+# (docs/report/03b_medium_band_factors.md), so they are context for the rationale, not triggers.
+DEFAULT_MEDIUM_BAND_FACTORS = ("POLICY_CONDITION_FAILED", "CLAIM_RECORD_CONTRADICTION", "HISTORY_CONTRADICTION")
+
+
 def concrete_factor_codes() -> frozenset[str]:
-    """Reason codes that count as a concrete, claim-specific factor for a medium-band fraud flag."""
-    return frozenset(_agent_setting("medium_band_concrete_factors", [
-        "RED_FLAGS_PRESENT", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD",
-        "STRONG_SHAP_DRIVER", "CONFLICTING_EVIDENCE"]))
+    """Reason codes that can justify a flag in the medium band (agent.medium_band_concrete_factors)."""
+    return frozenset(_agent_setting("medium_band_concrete_factors", list(DEFAULT_MEDIUM_BAND_FACTORS)))
+
+
+# Most prior claims each PastNumberOfClaims value allows.
+_PAST_CLAIMS_MAX = {"none": 0, "1": 1, "2 to 4": 4, "more than 4": None}
+
+
+def history_contradiction(tool_results: Mapping[str, Any]) -> Optional[str]:
+    """The claim-history source lists MORE previous claims than the claim itself reports
+    (PastNumberOfClaims): information from outside the model. Fewer found claims are not
+    flagged, because a source can cover a shorter period than the claimant's statement."""
+    ch = tool_results.get("claim_history") or {}
+    if not (ch.get("ok") and ch.get("history_available") and ch.get("previous_claim_count") is not None):
+        return None
+    reported = ((ch.get("recorded_summary") or {}).get("fields") or {}).get("PastNumberOfClaims")
+    cap = _PAST_CLAIMS_MAX.get(str(reported), None)
+    found = int(ch["previous_claim_count"])
+    if cap is not None and found > cap:
+        return (f"The claim reports PastNumberOfClaims '{reported}', but the claim-history source lists {found} "
+                "previous claims for this policy.")
+    return None
 
 
 def strong_shap_drivers(shap: Mapping[str, Any] | None, threshold: Optional[float] = None) -> list[str]:
@@ -78,14 +102,19 @@ def similar_fraud_elevated(sim: Mapping[str, Any] | None) -> bool:
 
 
 def fraud_evidence(tool_results: Mapping[str, Any]) -> bool:
-    """A fraud-risk signal beyond the score band: high band, a warning-level red flag, fraud
-    among the similar claims, or a strong (non-red-flag) SHAP driver. A medium band alone is
-    not one: on real validation its fraud rate is 8.8%, about 1.5x the 6% base rate."""
+    """A fraud-risk signal beyond the score band.
+    - high band: always;
+    - medium band: only information the model does not see (a contradiction from the history
+      tool). Red flags, SHAP drivers and similar-claim fraud do not separate fraud there;
+    - low band: a warning-level red flag, fraud among the similar claims, or a history
+      contradiction."""
     fs = tool_results.get("fraud_score") or {}
-    if fs.get("ok") and (fs.get("risk_band") == "high" or _warning_indicators(fs)):
+    band = fs.get("risk_band") if fs.get("ok") else None
+    if band == "high" or history_contradiction(tool_results):
         return True
-    return similar_fraud_elevated(tool_results.get("similar_claims")) or \
-        (fs.get("risk_band") == "medium" and bool(strong_shap_drivers(tool_results.get("shap_explanation"))))
+    if band == "medium":
+        return False
+    return bool(fs.get("ok") and _warning_indicators(fs)) or similar_fraud_elevated(tool_results.get("similar_claims"))
 
 
 def failed_required(tool_results: Mapping[str, Any], required: Iterable[str]) -> list[str]:
@@ -142,6 +171,9 @@ def find_conflicts(tr: Mapping[str, Any]) -> list[str]:
     if band in ("low", "medium") and policy_fails:
         out.append(f"The model risk band is {band}, but policy verification failed: "
                    + ", ".join(policy_fails) + ".")
+    hist = history_contradiction(tr)
+    if hist:
+        out.append(hist)
     return out
 
 
@@ -269,6 +301,8 @@ def reason_codes(decision: str, record: Mapping[str, Any], tool_results: Mapping
         codes.append("STRONG_SHAP_DRIVER")
     if ch.get("ok") and ch.get("status") == "unavailable":
         codes.append("CLAIM_HISTORY_UNAVAILABLE")
+    if history_contradiction(tr):
+        codes.append("HISTORY_CONTRADICTION")
     if record.get("conflicts"):
         codes.append("CONFLICTING_EVIDENCE")
     if any(s["status"] == "failed" for s in (record.get("tool_statuses") or {}).values()):
@@ -279,7 +313,7 @@ def reason_codes(decision: str, record: Mapping[str, Any], tool_results: Mapping
         codes.append("SIMULATED_DATA_USED")
     concerns = {"BLOCKING_VALIDATION", "HIGH_MODEL_RISK", "MEDIUM_MODEL_RISK", "RED_FLAGS_PRESENT",
                 "CLAIM_RECORD_CONTRADICTION", "POLICY_CONDITION_FAILED", "SIMILAR_CLAIMS_ELEVATED_FRAUD",
-                "STRONG_SHAP_DRIVER", "CONFLICTING_EVIDENCE", "TOOL_FAILURE",
+                "STRONG_SHAP_DRIVER", "HISTORY_CONTRADICTION", "CONFLICTING_EVIDENCE", "TOOL_FAILURE",
                 "INCOMPLETE_INVESTIGATION", "MODEL_SCORE_UNAVAILABLE"}
     if decision == "APPROVE" and not concerns & set(codes):
         codes.append("NO_MATERIAL_CONCERNS")

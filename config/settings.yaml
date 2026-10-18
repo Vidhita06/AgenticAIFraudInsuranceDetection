@@ -50,11 +50,13 @@ agent:
   # call one, complete_investigation runs it (logged as `auto`, not as an agent choice). All
   # are local and deterministic. similar_claims and claim_history stay the agent's choice.
   required_tools: [fraud_score, shap_explanation, policy_retrieval, policy_verification, similar_claims]
-  # A medium-band FRAUD_RISK flag needs at least one of these reason codes, otherwise the
-  # guardrail replaces it with the rule-based decision (unsupported_fraud_flag). Measured on
-  # real validation: docs/report/03b_medium_band_factors.md.
-  medium_band_concrete_factors: [RED_FLAGS_PRESENT, POLICY_CONDITION_FAILED, SIMILAR_CLAIMS_ELEVATED_FRAUD,
-                                 STRONG_SHAP_DRIVER, CONFLICTING_EVIDENCE]
+  # A medium-band flag needs at least one of these reason codes, otherwise the guardrail
+  # replaces it with the rule-based decision (unsupported_fraud_flag). Only information the
+  # fraud model does NOT see: red flags, SHAP drivers and similar-claim fraud are model features
+  # and do not separate fraud inside the medium band (docs/report/03b_medium_band_factors.md),
+  # so they are rationale context, not triggers. A policy-condition FAIL flag is tagged
+  # POLICY_CONDITION; a history contradiction is FRAUD_RISK.
+  medium_band_concrete_factors: [POLICY_CONDITION_FAILED, CLAIM_RECORD_CONTRADICTION, HISTORY_CONTRADICTION]
   # STRONG_SHAP_DRIVER: a feature other than the red flags contributes at least this many log-odds.
   strong_shap_log_odds: 0.5
 
