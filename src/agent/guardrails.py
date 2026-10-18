@@ -139,7 +139,8 @@ def rule_based_decision(claim_id: str, tool_results: Mapping[str, Any], reason: 
         fails = pv.get("failed_checks") or []
         evidence.append(Evidence(source_tool="policy_verification",
                                  fact=(f"Policy checks failed: {', '.join(fails)}" if fails else
-                                       f"Policy verification: {pv['counts']['PASS']} PASS, {pv['counts']['UNKNOWN']} UNKNOWN, 0 FAIL")))
+                                       f"Policy verification: {(pv.get('counts') or {}).get('PASS', 0)} PASS, "
+                                       f"{(pv.get('counts') or {}).get('UNKNOWN', 0)} UNKNOWN, 0 FAIL")))
     if sim.get("ok") and sim.get("k"):
         evidence.append(Evidence(source_tool="similar_claims",
                                  fact=f"{sim['neighbour_frauds']} of {sim['k']} most similar past claims were fraudulent"))

@@ -17,3 +17,4 @@ catboost_info/
 notebooks/_*.ipynb
 data/simulated/*.db
 data/simulated/*.db-journal
+data/audit/

@@ -4,6 +4,9 @@
     runner = TriageRunner()                       # LLM from .env, or rule-based if none
     thread_id, decision, trace = runner.run_claim(claim_dict)
     final_state = runner.resume(thread_id, {"decision": "APPROVE", "adjuster_id": "a1"})
+
+With `audit_db` (a path, or True for paths.audit_db) every recommendation and adjuster decision
+is also written to the SQLite audit store (src/agent/audit.py).
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ from typing import Any, Mapping, Optional
 
 from langgraph.types import Command
 
+from src.agent.audit import AuditStore
 from src.agent.graph import build_graph
 from src.agent.nodes import NodeDeps
 from src.schemas.decision import AdjusterDecision, TriageDecision
@@ -21,7 +25,8 @@ from src.schemas.decision import AdjusterDecision, TriageDecision
 
 class TriageRunner:
     def __init__(self, llm: Any = "auto", deps: Optional[NodeDeps] = None, checkpointer=None,
-                 audit_log: str | Path | None = None, purpose: str = "default"):
+                 audit_log: str | Path | None = None, purpose: str = "default",
+                 audit_db: str | Path | bool | None = None):
         if deps is None:
             if llm == "auto":
                 llm = _try_llm(purpose)
@@ -29,6 +34,8 @@ class TriageRunner:
         self.deps = deps
         self.graph = build_graph(deps, checkpointer)
         self.audit_log = Path(audit_log) if audit_log else None
+        self.audit = AuditStore(None if audit_db is True else audit_db) if audit_db else None
+        self.agent_mode = "llm" if deps.llm is not None else "rule_based"
 
     def run_claim(self, claim: Mapping[str, Any], thread_id: str | None = None
                   ) -> tuple[str, TriageDecision, list[dict]]:
@@ -39,15 +46,31 @@ class TriageRunner:
         decision = TriageDecision.model_validate(state["decision"])
         self._log({"thread_id": thread_id, "event": "recommendation", "decision": state["decision"],
                    "trace": state.get("trace", [])})
+        if self.audit:
+            self.audit.record_recommendation(thread_id, state["decision"], self.agent_mode)
         return thread_id, decision, state.get("trace", [])
 
+    def pending_review(self, thread_id: str) -> bool:
+        """True while the run is paused at human review."""
+        return self.graph.get_state({"configurable": {"thread_id": thread_id}}).next == ("human_review",)
+
     def resume(self, thread_id: str, adjuster_decision: Mapping[str, Any]) -> dict[str, Any]:
+        """Record the adjuster's decision and finish the paused run. Overriding the
+        recommendation requires a reason; a run can be reviewed only once."""
         adj = AdjusterDecision.model_validate(dict(adjuster_decision)).model_dump()
         cfg = {"configurable": {"thread_id": thread_id}}
+        snapshot = self.graph.get_state(cfg)
+        if snapshot.next != ("human_review",):
+            raise RuntimeError(f"run {thread_id} is not waiting for human review (already reviewed or unknown)")
+        recommendation = snapshot.values["decision"]
+        if adj["decision"] != recommendation["decision"] and not (adj.get("override_reason") or "").strip():
+            raise ValueError("overriding the recommendation requires an override reason")
         self.graph.invoke(Command(resume=adj), cfg)
         state = self.graph.get_state(cfg).values
         self._log({"thread_id": thread_id, "event": "adjuster_decision", "adjuster": adj,
                    "recommendation": state["decision"]["decision"]})
+        if self.audit:
+            self.audit.record_adjuster_decision(thread_id, state["decision"], adj)
         return state
 
     def _log(self, record: dict) -> None:

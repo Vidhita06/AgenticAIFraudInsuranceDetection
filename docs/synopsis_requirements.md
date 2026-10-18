@@ -23,7 +23,7 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending · ⏸ deferred.
 | O2 | Autonomous LLM orchestrator that plans and runs a multi-step triage workflow with tools | P7 (design + tools), Later (agent) | 🟡 LangGraph agent built and tested (`src/agent/`); live LLM evaluation pending |
 | O3 | Similar-claims retrieval to compare a new claim with historical patterns | P7 | ✅ FAISS over real training claims (`src/retrieval/`, `find_similar_claims`) |
 | O4 | Structured, human-readable decision with rationale (Approve / Flag for Investigation / Request More Information) | P5 (decision policy), P7 (explain + rules tools), Later | 🟡 `TriageDecision` + guardrails built; live LLM rationale quality pending |
-| O5 | Lightweight human-in-the-loop dashboard (review, override, feedback) | P7 (design), Later (Streamlit) | ⏸ deferred |
+| O5 | Lightweight human-in-the-loop dashboard (review, override, feedback) | P7 (design), Later (Streamlit) | ✅ `dashboard/app.py` (Streamlit): review, approve/override with reason, audit store; feedback-driven retraining still deferred |
 | O6 | Close the feedback loop: adjuster decisions used to retrain the model | P7 (`src/feedback/`, `retrain.py` stub), Later | ⏸ deferred |
 
 ## 2. Methodology phases (synopsis §5, proposal §6)
@@ -52,7 +52,7 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending · ⏸ deferred.
 | D8 | Callable **tool: similar-claims retrieval** (FAISS/ChromaDB) | P7 (`find_similar_claims`) | ✅ `src/tools/similar_claims_tool.py` |
 | D9 | Callable **tool: policy/history checks** | P1 (rules), P3 (red flags), team plan Tools 3, 4, 6 | ✅ `policy_retrieval_tool.py`, `policy_verification_tool.py` (PASS/FAIL/UNKNOWN), `claim_history_tool.py`. The data has no policy documents or linked history, so these report `partial` / `UNKNOWN` / `unavailable` instead of inventing them. |
 | D10 | Functional agentic pipeline (orchestrator + tools) | Later | 🟡 built (`src/agent/`); live LLM run pending |
-| D11 | Dashboard: submit a claim, view decision and rationale, approve or override | Later | ⏸ deferred |
+| D11 | Dashboard: submit a claim, view decision and rationale, approve or override | Later | ✅ `dashboard/app.py`; runs on CPU without an LLM (rule-based mode) or with the LLM from .env |
 | D12 | End-to-end pipeline runs on **held-out claims without manual intervention** | Later (P7 designs the evaluation) | ⬜ `scripts/run_batch_triage.py all` (needs API key) |
 | D13 | Final project report (problem, methodology, architecture, results, future scope) | P3/P6 reports feed it; Later | 🟡 reports 01–03 + model card exist; final write-up pending |
 | D14 | Presentation deck / demo video (`details/PROJECT PRESENTATION TEMPLATE.pptx`) | Later | ⏸ deferred |
@@ -68,7 +68,7 @@ Status values: ✅ done · 🟡 partly done · ⬜ pending · ⏸ deferred.
 | S3 | Accuracy measured on held-out claims | P6 | ✅ test accuracy 0.808 (all-legit baseline 0.940; see report) |
 | S4 | Agent retrieves relevant similar claims and writes a coherent, policy-consistent rationale for most test claims | P7 (retrieval sanity check), Later | ⬜ live agent evaluation pending (`run_batch_triage.py all`) |
 | S5 | End-to-end pipeline produces a reviewable recommendation for each sampled held-out claim | Later | ⬜ live agent evaluation pending |
-| S6 | Dashboard lets an adjuster view details, score and rationale, and record approve/override | Later | ⏸ deferred (dashboard) |
+| S6 | Dashboard lets an adjuster view details, score and rationale, and record approve/override | Later | ✅ decision, flag category, rationale, six tool results, SHAP chart, guardrail notes; overrides need a reason; written to `data/audit/audit.db` |
 
 ## 5. Additions from this work plan (not in the synopsis, needed for rigour)
 

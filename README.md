@@ -72,6 +72,8 @@ scripts/run_batch_triage.py   offline | estimate | pilot | final | all
 scripts/install_b200_outputs.py   install B200 artifacts, rebuild the index, run tests
 notebooks/03_agent_evaluation.ipynb   analysis notebook (never spends money)
 docs/architecture.png      graph diagram (docs/make_architecture_diagram.py)
+dashboard/app.py           Streamlit adjuster dashboard (dashboard/core.py: logic without the UI)
+src/agent/audit.py         SQLite audit store: recommendations + adjuster decisions (data/audit/audit.db)
 ```
 
 ## Setup
@@ -250,6 +252,52 @@ With `enabled: false` (the default) the tools behave exactly as without it.
 Without an API key the agent still runs and returns the rule-based decision.
 `pytest -q` covers every graph path with a scripted fake chat model, so it needs no key and
 no network.
+
+## Adjuster dashboard (laptop, no GPU)
+
+A Streamlit app for the human-in-the-loop review. It runs on an ordinary laptop: the fraud
+model, SHAP, FAISS and the rule-based agent all run on CPU, and no LLM or GPU is needed.
+
+```bash
+git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
+cd AgenticAIFraudInsuranceDetection
+python -m venv .venv
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python scripts/build_vector_index.py   # once: similar-claims index (~1 min)
+python scripts/build_simulated_db.py   # optional: simulated reference data (~5 s)
+streamlit run dashboard/app.py         # opens http://localhost:8501
+```
+
+**What you can do:**
+1. **Claim:** pick a real validation claim (filter by risk band; its known outcome stays hidden
+   in a collapsed panel and is never given to the agent), or fill in a new claim on the form.
+   Any field can be edited before running.
+2. **Agent** (sidebar):
+   - *Rule-based (no LLM)*: the default; instant and deterministic, and runs all six tools.
+   - *LLM from .env*: uses `LLM_PROVIDER` / `MODEL_NAME`. On a laptop, Ollama with
+     `qwen2.5:7b` runs on CPU but is slow (about 1–3 minutes per claim); a free API (Groq,
+     OpenRouter, Gemini; see `.env.example`) is faster. If the LLM isn't reachable, the sidebar
+     says why and you can switch back to rule-based.
+   - The *simulated reference data* toggle feeds Tools 3, 4 and 6 from `data/simulated/insurance.db`.
+3. **Recommendation:**
+   - decision, flag category (FRAUD_RISK / POLICY_CONDITION / SYSTEM_FAILURE), fraud probability
+     and band, reason codes and rationale;
+   - evidence traced to its tool, guardrail notes, conflicts, missing information and
+     unresolved questions.
+4. **Tool results:** a status table for the six tools (who called each one, real or simulated
+   data), a tab per tool (with the SHAP chart, policy checks, similar claims and claim history),
+   and the full trace.
+5. **Your decision:**
+   - approve the recommendation, or override it with APPROVE / FLAG / REQUEST_MORE_INFORMATION / DENY.
+     Only the adjuster can deny.
+   - Overriding requires a reason.
+   - Submitting resumes the paused LangGraph run and writes the decision to the audit store
+     `data/audit/audit.db` (tables `recommendations` and `adjuster_decisions`; the path is
+     `paths.audit_db`). The sidebar lists recent audit entries.
+
+`pytest tests/test_dashboard.py` drives the dashboard headless: it runs a claim, checks that an
+override without a reason is refused, and checks the audit row.
 
 ## Agent evaluation (Step D)
 

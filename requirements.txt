@@ -26,6 +26,9 @@ pyarrow==25.0.1
 python-dotenv==1.2.2
 langchain-ollama==1.1.0
 langchain-openai==1.7.2
+# Adjuster dashboard (streamlit run dashboard/app.py); altair comes with streamlit
+streamlit==1.62.0
+altair==6.3.0
 # Running the notebooks headless (jupyter nbconvert --execute)
 ipykernel==7.4.0
 nbconvert==7.17.1

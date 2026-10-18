@@ -18,6 +18,8 @@ paths:
   figures_dir: docs/report/figures
   tables_dir: docs/report/tables
   evaluation_results_dir: evaluation/results
+  # Recommendations and adjuster decisions (dashboard, TriageRunner(audit_db=True)); git-ignored.
+  audit_db: data/audit/audit.db
 
 data:
   target: FraudFound_P
