@@ -78,6 +78,15 @@ src/agent/audit.py         SQLite audit store: recommendations + adjuster decisi
 
 ## Setup
 
+**Python 3.11 or 3.12 is recommended.** The B200 run used 3.12, and the test suite runs on 3.11
+and 3.12. Python 3.13 also works:
+- every pin, and every package they pull in, has pre-built wheels for Windows x64 on
+  Python 3.11–3.13;
+- the tests pass on 3.13.
+
+Python 3.14 is untested. If `pip install` starts "Building wheel for …" or asks for a C++
+compiler, that Python version has no pre-built wheel for some pin: use Python 3.12.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -261,7 +270,7 @@ model, SHAP, FAISS and the rule-based agent all run on CPU, and no LLM or GPU is
 ```bash
 git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
 cd AgenticAIFraudInsuranceDetection
-python -m venv .venv
+python -m venv .venv                   # Python 3.11 or 3.12 recommended; Windows: py -3.12 -m venv .venv
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python scripts/build_vector_index.py   # once: similar-claims index (~1 min)
