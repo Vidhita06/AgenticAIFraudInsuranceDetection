@@ -438,6 +438,33 @@ with st.sidebar:
 
     st.markdown("---")
 
+    mode_label = st.radio(
+        "Agent Mode",
+        ["Rule-based (no LLM)", "LLM from .env"],
+        index=0 if st.session_state.agent_mode == "rule_based" else 1,
+        help="Rule-based needs no model or GPU. LLM mode uses LLM_PROVIDER / MODEL_NAME "
+             "from .env (Ollama, an OpenAI-compatible API, or Anthropic).",
+    )
+    new_mode = "llm" if mode_label.startswith("LLM") else "rule_based"
+    if new_mode != st.session_state.agent_mode:
+        st.session_state.agent_mode = new_mode
+        get_runner.clear()
+        st.rerun()
+
+    sim_avail = core.simulated_db_available()
+    new_sim = st.toggle(
+        "Simulated reference data",
+        value=st.session_state.simulated,
+        disabled=not sim_avail,
+        help="Illustrative policies, clauses and prior claims for Tools 3, 4, 6.",
+    )
+    if not sim_avail:
+        st.caption("Simulated DB not built")
+    if new_sim != st.session_state.simulated:
+        st.session_state.simulated = new_sim
+        get_runner.clear()
+        st.rerun()
+
     mode = st.session_state.agent_mode
     sim = st.session_state.simulated
     setup, runner = get_runner(mode, sim)
@@ -451,6 +478,11 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     st.caption(f"Agent: {setup.description}")
+    if setup.error:
+        st.error(setup.error)
+        if st.button("Retry connection"):
+            get_runner.clear()
+            st.rerun()
 
     st.markdown("---")
     st.markdown("""
