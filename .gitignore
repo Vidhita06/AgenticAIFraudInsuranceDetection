@@ -18,3 +18,8 @@ notebooks/_*.ipynb
 data/simulated/*.db
 data/simulated/*.db-journal
 data/audit/
+
+# Node
+node_modules/
+package.json
+package-lock.json
