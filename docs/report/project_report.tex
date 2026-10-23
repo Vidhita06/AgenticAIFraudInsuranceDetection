@@ -749,6 +749,34 @@ A fairness audit by Sex, age band and MaritalStatus confirmed that removing \tex
     \item The system is designed for vehicle insurance only; other lines would require new features and recalibration.
 \end{itemize}
 
+\subsection{Learnings and Findings from the NVIDIA DGX B200 Environment}
+
+The entire training, evaluation and agentic pipeline was developed on an NVIDIA DGX B200 server. This section documents the key learnings from working with this high-performance infrastructure.
+
+\subsubsection{Hardware Capabilities}
+
+The B200 GPU features compute capability~10.0 with 192~GB of HBM3e memory and is paired with CUDA~12.9. Although the LightGBM training itself runs on CPU by design, the B200 environment enabled several workflows that would have been impractical on commodity hardware:
+
+\begin{itemize}
+    \item \textbf{Local LLM inference:} Ollama served \texttt{qwen2.5:72b} (a 72-billion-parameter open-source model) entirely on-device, eliminating API costs and data-privacy concerns. The 192~GB VRAM comfortably holds the quantised model weights.
+    \item \textbf{Rapid experimentation:} The data-mix experiment (Table~7) swept five synthetic-weight configurations, each training three-seed ensembles. On the B200 the full sweep completed in under 20~minutes.
+    \item \textbf{FAISS vector store:} Building and querying a FAISS index over 10,793 training claims for the similar-claims tool was near-instantaneous on the B200's CPU/memory subsystem.
+\end{itemize}
+
+\subsubsection{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{GPU is not required for gradient-boosted trees.} LightGBM uses CPU-based histogram binning; the B200 GPU was idle during training. The saved model artifacts (\texttt{fraud\_model.joblib}, \texttt{preprocessor.joblib}) are portable and run inference on any machine with $\leq$512~MB of RAM.
+    \item \textbf{On-device LLM removes vendor lock-in.} Running qwen2.5:72b locally meant zero API calls, deterministic outputs (temperature~0), and no rate limits during the 556-claim offline evaluation. This would not be feasible on a consumer GPU.
+    \item \textbf{Reproducibility is hardware-agnostic.} All random seeds are fixed at 42 across NumPy, scikit-learn and LightGBM. The trained model reproduces identical predictions when loaded on a CPU-only machine, confirming that the B200 environment introduces no hardware-specific non-determinism.
+    \item \textbf{End-to-end pipeline validation.} The B200 allowed running the complete LangGraph pipeline (ingestion $\rightarrow$ scoring $\rightarrow$ ReAct loop $\rightarrow$ guardrails $\rightarrow$ triage) at scale, processing all 556 evaluation claims in a single batch without memory or timeout issues.
+    \item \textbf{Deployment portability lesson.} While the B200 was essential for development and LLM inference, the production deployment requires only the serialised LightGBM model (CPU) and an API-based LLM (e.g.\ Groq, Google AI Studio). This separation of training-time and inference-time requirements is a key architectural insight.
+\end{enumerate}
+
+\subsubsection{Recommendations for Future B200 Usage}
+
+For teams with access to DGX-class hardware, we recommend: (a)~reserving the GPU for LLM serving and vector-store operations rather than tree-based training; (b)~developing with a local LLM first, then switching to an API provider for deployment; and (c)~using the hardware's memory bandwidth for large-scale offline evaluation before deploying to resource-constrained environments.
+
 
 % ══════════════════════════════════════════════════════════
 %  CHAPTER 7 — CONCLUSION AND FUTURE SCOPE
