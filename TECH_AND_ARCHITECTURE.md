@@ -12,7 +12,8 @@ All numbers come from the project's own reports:
 
 - `docs/report/01_eda_report.md`: EDA and synthetic-data audit;
 - `docs/report/02_model_report.md` and `model_card.md`: the fraud model;
-- `docs/report/03_agent_evaluation.md`: the agent evaluation;
+- `docs/report/03_agent_evaluation.md` (= `03_agent_evaluation_qwen2.5_72b.md`): the live
+  test-set evaluation of the agent with qwen2.5:72b;
 - `docs/report/03b_medium_band_factors.md`: the medium-band analysis.
 
 Where something is not yet measured, the document says so.
@@ -346,6 +347,8 @@ Rules applied after the LLM's synthesis; any violation is overridden and noted i
   already used them.
 - So only information the model does not see can trigger a medium-band flag.
 - After the fix, the pilot agreed with the model policy on 10/10 claims in both modes.
+- The final test run (140 claims, qwen2.5:72b) had 0 grounding removals, 0 fallbacks and 0
+  `max_steps` hits. The only interventions were blocking-validation overrides (1 off, 2 on).
 
 ---
 
@@ -361,9 +364,17 @@ Rules applied after the LLM's synthesis; any violation is overridden and noted i
 | **Clauses** | `config/simulated_policy_clauses.yaml` (SIM-ALL-01…05, SIM-LIA, SIM-COL, SIM-AP); the reporting deadline is set to 60 days after a fail-rate check | A clause failing on more than about 5% of claims would flag claims for an artefact of the simulation |
 | **Toggle** | `simulated_data.enabled: false` by default; evaluation runs `off`, `on` or `both` | With it off, the tools behave exactly as before |
 
-**Measured effect (offline, 278 validation claims):** off vs on gave the same FRAUD_RISK recall
-(0.748). It added one POLICY_CONDITION flag and changed one approval. This shows the
-simulated data affects coverage questions only, not fraud detection, which is what we want.
+**Measured effect:**
+
+- **Offline, 278 validation claims:** off vs on gave the same FRAUD_RISK recall (0.748).
+- **Live test run, qwen2.5:72b:** off vs on gave the same FRAUD_RISK recall (0.814, 57/70).
+  - SIM-ALL-04 (reporting deadline) failed on 6 of 142 claims and SIM-COL-02 on 2.
+  - Two legit claims changed from APPROVE to FLAG, both on SIM-ALL-04: PN-777 as
+    POLICY_CONDITION, PN-7915 as FRAUD_RISK. PN-7915 is low-band; the code tags a flag
+    FRAUD_RISK when low-band fraud evidence (a warning red flag or similar-claim fraud) is
+    present.
+
+So the simulated data changes coverage questions, not fraud detection, which is what we want.
 
 ---
 
@@ -431,7 +442,7 @@ simulated data affects coverage questions only, not fraud detection, which is wh
 |---|---|---|---|
 | Laptop demo | CPU | Ollama `qwen2.5:7b`, or an API | Fully offline possible |
 | Free cloud (Streamlit Community Cloud / Render free) | CPU | Groq / Gemini via `LLM_PROVIDER=openai` + `OPENAI_BASE_URL` | Peak about 445 MB fits a 512 MB tier tightly; rate limits; no SLA; needs a re-pilot with that model |
-| B200 / GPU server | CPU (fine) | Ollama `qwen2.5:72b` | Best local quality; about 83 s per investigation in the pilot |
+| B200 / GPU server | CPU (fine) | Ollama `qwen2.5:72b` | Best local quality; test run p50 latency 47 s (off) / 55 s (on), p95 66 / 74 s; about 7.3–7.9k input tokens per claim |
 | Production (future) | CPU container | Contracted API or self-hosted vLLM | Add PostgreSQL audit, auth, monitoring and drift checks |
 
 **If the LLM is unavailable,** the rule-based fallback still returns a guardrailed decision.
@@ -447,7 +458,14 @@ The system never blocks on the LLM.
 - **Accident Month's SHAP rank is unexplained.** An ablation is pending.
 - **No real policy documents or claim history exist.** Tools 3/4/6 rely on attributes, the
   simulated DB, or `unavailable`.
-- **The live LLM test-set evaluation has not been run yet.** The pilot (10 claims, 10/10
-  agreement) and the offline rule-based baseline are done. Free-API models need their own
-  pilot before use.
+- **The live test run covers 140 claims** (70 frauds + 70 legit), so its CIs are wide (recall
+  0.814 [0.708, 0.888]).
+  - With simulated data off, the agent's decisions equal the model-only threshold policy on
+    all 140 claims. Its value is the investigation (evidence, explanation, audit), not extra
+    detection.
+  - The sim-on results file has 142 rows (72 legit) against 140 off. This needs checking for
+    duplicate rows; the raw JSONL files were not uploaded.
+  - The LLM-as-judge was the same qwen2.5:72b model, so its 1.0 scores are a weak check; the
+    manual-review CSVs are the stronger one.
+- **Free-API models** need their own pilot before use.
 - **The 10:1 cost ratio is an assumption,** not insurer data.

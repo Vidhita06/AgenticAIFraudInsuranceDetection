@@ -26,6 +26,7 @@ Background detail is in `TECH_AND_ARCHITECTURE.md` and `docs/report/`.
 | Synthetic adversarial AUC | 0.511 (indistinguishable from real) |
 | Agent | 6 tools, ≤ 8 steps, 3 decisions, never deny |
 | Pilot | 10/10 agreement with the model policy, both modes |
+| Live test run (qwen2.5:72b, 70 fraud + 70 legit) | FRAUD_RISK recall 0.814 (57/70), legit → APPROVE 0.729, precision re-weighted 0.175; 0 fallbacks; consistency 100%; p50 47 s |
 | Memory | dashboard about 445 MB peak; model file 1.9 MB |
 
 ---
@@ -484,7 +485,8 @@ Only `agent` and `synthesize` call an LLM; everything else is deterministic Pyth
 
 > "The AI was too nervous at first: it treated 'we don't have the policy document' as
 > suspicious, even though that's true for every claim. We measured it, fixed it with rules,
-> and re-tested until it behaved."
+> and re-tested until it behaved. On the final test run, the guardrails never had to remove
+> an invented fact."
 
 ---
 
@@ -664,20 +666,73 @@ detection.
 > "If the system flags a claim because a tool broke, that's not catching fraud, so we don't
 > give ourselves credit for it."
 
-### I3. What evaluation results do you have so far?
+### I3. What were the final agent results?
 
-**Technical answer:**
+**Technical answer** (`docs/report/03_agent_evaluation.md`; qwen2.5:72b via Ollama on the B200;
+70 test frauds + 70 test legit, run once per mode):
 
-- **Offline rule-based baseline** on 278 validation claims: recall 0.748, legit-approve
-  0.842.
-- **LLM pilot** (qwen2.5:72b on the B200): 10/10 agreement.
-- **The full live test-set run is still to be run.** Validation numbers are optimistic
-  because the thresholds were chosen there.
+| Metric | Sim off | Sim on |
+|---|---|---|
+| Fraud → FRAUD_RISK flag (recall) | 0.814 (57/70) [0.708, 0.888] | 0.814 (57/70) |
+| Legit → APPROVE | 0.729 (51/70) | 0.708 (51/72) |
+| False FRAUD_RISK flag rate | 0.243 | 0.250 |
+| FRAUD_RISK precision, re-weighted to 6% prevalence | 0.175 | 0.167 |
+| REQUEST_MORE_INFORMATION | 3/140 | 3/142 |
+| Fallbacks / grounding removals / max-step hits | 0 / 0 / 0 | 0 / 0 / 0 |
+| Run-to-run consistency (20 claims × 3) | 100% identical | 100% identical |
+| p50 / p95 latency | 47 s / 66 s | 55 s / 74 s |
+
+- **Agreement:** with sim off, the agent agreed with the model-only policy on all 140 claims.
+  With sim on, it differed on 2 legit claims, both flagged for the SIM-ALL-04 reporting
+  deadline.
+- **Earlier stages:** the offline rule-based baseline on 278 validation claims (recall 0.748)
+  and the 10-claim pilot (10/10 agreement).
 
 **Say it simply:**
 
-> "The pilot is clean, and the final run on the test set is the next step. We're not claiming
-> numbers we haven't measured."
+> "On unseen test claims the agent caught 81% of the fraud cases, never crashed or fell back,
+> gave the same answer every time we re-ran it, and its explanations only used real facts
+> from the tools."
+
+### I4. If the agent agrees with the model on every claim, what does the agent add?
+
+**Technical answer:**
+
+- **Detection is deliberately the model's job.** The guardrails stop the LLM from flagging
+  without evidence, so agreement is the *intended* safe behaviour, not a failure.
+- **The agent adds the investigation:**
+  - SHAP reasons;
+  - policy checks with PASS/FAIL/UNKNOWN;
+  - similar precedents;
+  - conflicts (34 claims had one);
+  - missing information;
+  - unresolved questions for the adjuster;
+  - a cited, plain-English rationale and an audit record.
+- **With policy data present (sim on),** it raised coverage questions the model cannot see:
+  the reporting-deadline FAILs.
+
+**Say it simply:**
+
+> "The model tells you *which* claims are risky; the agent tells the adjuster *why*, what's
+> missing, and what to check next. And when there's information the model can't see, like a
+> missed reporting deadline, the agent is the part that catches it."
+
+### I5. What are the weaknesses of that evaluation?
+
+**Technical answer:**
+
+- **140 claims** means wide CIs: recall [0.708, 0.888].
+- **The judge is the same model,** qwen2.5:72b, so the judge scores (1.0, and 0.975 for
+  no_invented_facts with sim on) are a weak check. The manual-review CSVs are the stronger
+  one.
+- **The sim-on run has 142 rows against 140** (72 legit). To be checked for duplicate rows
+  before quoting sim-on rates.
+- **The LLM is slow:** about 50 s per claim on a 72b model.
+
+**Say it simply:**
+
+> "It's a small sample, and an AI grading itself isn't strong evidence. That's why we also
+> exported claims for humans to review."
 
 ---
 
@@ -766,7 +821,9 @@ for Windows from Linux. uv is only a verification tool.
 
 **Technical answer:**
 
-- **The LLM**, by far: about 83 s per investigation with qwen2.5:72b in the pilot.
+- **The LLM**, by far. With qwen2.5:72b on the B200: p50 47 s and p95 66 s per
+  investigation (sim off). That is about 2.5 tool calls, about 7.3k input tokens and about 390
+  output tokens per claim.
 - **Everything else is milliseconds:** LightGBM scoring, TreeSHAP for one claim, a FAISS
   search over 10.8k vectors, SQLite.
 - A cold first investigation (loading the model and index) took about 21 s in the cloud
@@ -917,7 +974,7 @@ a persistent checkpointer.
 - **LightGBM vs XGBoost** is within noise, and **CatBoost was not compared**.
 - **The Month SHAP anomaly** is unexplained.
 - **No real policy documents or history** exist.
-- **The live LLM test run is pending.**
+- **The live test run is small** (140 claims), and its judge was the same LLM.
 - **The 10:1 cost ratio** is an assumption.
 - **The dataset is 1994–96 US data,** so concept drift is likely.
 
@@ -930,7 +987,7 @@ a persistent checkpointer.
 
 **Technical answer:**
 
-- Run the final live evaluation.
+- Check the sim-on row count, and run a larger live evaluation with an independent judge.
 - Compare CatBoost.
 - Run the Month ablation.
 - A Liability-specific model or rules.
