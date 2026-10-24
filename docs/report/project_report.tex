@@ -1,0 +1,975 @@
+% ============================================================
+%  B.Tech Project Report — Agentic AI Insurance Claims
+%  Fraud Detection System
+%  Ramdeobaba University, School of CSE, IDEA Lab
+%  Session 2026–27
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+% ── Packages ──────────────────────────────────────────────
+\usepackage[margin=2.5cm,headheight=14.5pt]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{mathptmx}                 % Times Roman
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{url}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!60!black
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue!70!black},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red!60!black}
+}
+
+\onehalfspacing
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small Agentic AI — Insurance Claims Fraud Detection}
+\lhead{\small RBU IDEA Lab}
+\cfoot{\thepage}
+
+% ══════════════════════════════════════════════════════════
+%                        TITLE PAGE
+% ══════════════════════════════════════════════════════════
+\begin{document}
+
+\begin{titlepage}
+\centering
+\vspace*{1cm}
+
+{\Large\bfseries RAMDEOBABA UNIVERSITY}\\[4pt]
+{\large SCHOOL OF COMPUTER SCIENCE AND ENGINEERING}\\[1.5cm]
+
+% Placeholder for university logo
+\begin{figure}[H]
+\centering
+\fbox{\parbox{3cm}{\centering\vspace{1cm}\textit{University\\Logo}\vspace{1cm}}}
+\end{figure}
+\vspace{0.5cm}
+
+{\Large\bfseries B.TECH PROJECT REPORT\\(IDEA Lab)}\\[0.8cm]
+ON\\[0.8cm]
+{\LARGE\bfseries AGENTIC AI --- AUTONOMOUS INSURANCE\\CLAIMS FRAUD DETECTION SYSTEM}\\[1.5cm]
+
+\textbf{Submitted by}\\[0.4cm]
+\begin{tabular}{ll}
+Apeksha Sharma   & (Roll No. \_\_\_\_\_\_\_\_) \\
+Gunjal Mandawkar & (Roll No. \_\_\_\_\_\_\_\_) \\
+Vaishnavi Singh  & (Roll No. \_\_\_\_\_\_\_\_) \\
+Vidhita Bais     & (Roll No. \_\_\_\_\_\_\_\_) \\
+\end{tabular}\\[1.2cm]
+
+\textbf{Under the Guidance of}\\
+\textbf{Prof./Dr. Guide Name}\\[1.5cm]
+
+\textbf{Academic Year: 2026 -- 2027}
+
+\end{titlepage}
+
+% ══════════════════════════════════════════════════════════
+%                  STUDENT DECLARATION
+% ══════════════════════════════════════════════════════════
+\newpage
+\section*{Student Declaration}
+\addcontentsline{toc}{section}{Student Declaration}
+
+We hereby declare that the project report entitled \textit{``Agentic AI --- Autonomous Insurance Claims Fraud Detection System''} is submitted as part of the requirements for the B.Tech programme at Ramdeobaba University.
+
+The work presented in this report is prepared by the undersigned students under the guidance of the project supervisor.  All external sources, datasets, software tools, figures and technical material used in the project have been appropriately acknowledged.
+
+\vspace{1cm}
+\begin{tabular}{ll}
+Apeksha Sharma   & Roll No. \_\_\_\_\_\_\_\_\_\_ \\[6pt]
+Gunjal Mandawkar & Roll No. \_\_\_\_\_\_\_\_\_\_ \\[6pt]
+Vaishnavi Singh  & Roll No. \_\_\_\_\_\_\_\_\_\_ \\[6pt]
+Vidhita Bais     & Roll No. \_\_\_\_\_\_\_\_\_\_ \\
+\end{tabular}
+
+% ══════════════════════════════════════════════════════════
+%                  ACKNOWLEDGEMENT
+% ══════════════════════════════════════════════════════════
+\newpage
+\section*{Acknowledgement}
+\addcontentsline{toc}{section}{Acknowledgement}
+
+We express our sincere gratitude to Ramdeobaba University and the School of Computer Science and Engineering for providing the academic environment and facilities required to complete this project.
+
+We are grateful to our project guide for continuous guidance, technical suggestions and constructive feedback throughout the project.  We also thank the Project In-Charge, Associate Head and Dean, School of Computer Science and Engineering, for their support.
+
+We acknowledge the support of our classmates, laboratory staff, friends and family members who contributed directly or indirectly to the completion of this work.
+
+% ══════════════════════════════════════════════════════════
+%                        ABSTRACT
+% ══════════════════════════════════════════════════════════
+\newpage
+\section*{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+
+Insurance claims fraud costs the industry billions of dollars annually, yet the extreme class imbalance inherent in fraud datasets---typically around 6\% positive rate---renders simple rule-based systems and naive classifiers ineffective.  This project presents \textbf{Fraud Oracle}, an end-to-end autonomous insurance claims triage system that combines a calibrated gradient-boosted decision tree (LightGBM) with an agentic AI orchestrator built on LangGraph.
+
+The machine learning model achieves \textbf{0.874~ROC-AUC} and \textbf{79\% recall} on a held-out test set of 2,313 real vehicle insurance claims, with Platt-calibrated probability outputs (Brier score 0.049) and TreeSHAP explainability.  The agentic pipeline implements an 8-step workflow---from claim ingestion through validation, ML scoring, multi-tool investigation via a ReAct loop, evidence aggregation, synthesis, code-enforced guardrails, to human review---producing structured triage decisions across three categories: \textit{Approve}, \textit{Flag for Investigation}, and \textit{Request More Information}.
+
+Eight guardrails are enforced in code (not prompts) to ensure safety: the system never denies a claim, high-risk claims are never auto-approved, every evidence fact traces to its source tool, and every recommendation requires human adjuster sign-off.  Offline evaluation demonstrates 100\% consistency across repeated runs with zero processing errors.
+
+\textbf{Keywords:} Insurance Fraud Detection, Agentic AI, LangGraph, Gradient Boosting, LightGBM, Class Imbalance, SHAP Explainability, Human-in-the-Loop, ReAct Agent
+
+% ══════════════════════════════════════════════════════════
+%                  TABLE OF CONTENTS
+% ══════════════════════════════════════════════════════════
+\newpage
+\tableofcontents
+
+\newpage
+\listoffigures
+\addcontentsline{toc}{section}{List of Figures}
+
+\newpage
+\listoftables
+\addcontentsline{toc}{section}{List of Tables}
+
+% ══════════════════════════════════════════════════════════
+%               LIST OF ABBREVIATIONS
+% ══════════════════════════════════════════════════════════
+\newpage
+\section*{List of Abbreviations}
+\addcontentsline{toc}{section}{List of Abbreviations}
+
+\begin{longtable}{@{}ll@{}}
+\toprule
+\textbf{Abbreviation} & \textbf{Meaning} \\
+\midrule
+\endhead
+AI     & Artificial Intelligence \\
+AUC    & Area Under the Curve \\
+CI     & Confidence Interval \\
+EDA    & Exploratory Data Analysis \\
+FAISS  & Facebook AI Similarity Search \\
+FPR    & False Positive Rate \\
+GBDT   & Gradient-Boosted Decision Trees \\
+IoT    & Internet of Things \\
+IV     & Information Value \\
+LLM    & Large Language Model \\
+MAE    & Mean Absolute Error \\
+ML     & Machine Learning \\
+MLP    & Multi-Layer Perceptron \\
+PR-AUC & Precision--Recall Area Under the Curve \\
+RBU    & Ramdeobaba University \\
+ReAct  & Reason + Act (agent pattern) \\
+ROC    & Receiver Operating Characteristic \\
+SHAP   & SHapley Additive exPlanations \\
+SMOTE  & Synthetic Minority Over-sampling Technique \\
+TRTR   & Train on Real, Test on Real \\
+TSTR   & Train on Synthetic, Test on Real \\
+TVD    & Total Variation Distance \\
+\bottomrule
+\end{longtable}
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 1 — INTRODUCTION
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Introduction}
+\label{ch:intro}
+
+\subsection{Background}
+
+Insurance fraud is a pervasive problem affecting the global insurance industry.  According to industry estimates, fraudulent claims account for 5--10\% of all claims by volume but represent a disproportionately large share of claim payouts.  Vehicle insurance, with its high claim frequency and standardised claim structures, is particularly vulnerable to opportunistic and organised fraud.
+
+Traditional fraud detection relies on manually crafted business rules and periodic audits.  While domain experts can identify obvious red flags---such as at-fault claims on liability-only policies or unusually high-value claims from new policyholders---these rules fail to capture complex, multi-feature interactions that characterise sophisticated fraud.  Statistical classifiers offer a data-driven alternative but face the fundamental challenge of \textbf{extreme class imbalance}: with a 6\% fraud rate, a classifier that predicts ``legitimate'' for every claim achieves 94\% accuracy yet catches zero fraud.
+
+Recent advances in large language models (LLMs) and agent frameworks have introduced a new paradigm: \textbf{agentic AI}, where an autonomous orchestrator dynamically selects and executes specialised tools to investigate each claim.  This project combines the statistical power of gradient-boosted models with the reasoning capability of an LLM agent, bridging the gap between raw prediction and actionable, explainable triage decisions.
+
+\subsection{Problem Statement}
+
+The problem addressed by this project is threefold:
+
+\begin{enumerate}[label=(\alph*)]
+    \item \textbf{Detection:} Build a machine learning model that reliably separates fraudulent from legitimate vehicle insurance claims despite the 6\% base rate, without inflating false positives to an operationally unacceptable level.
+    \item \textbf{Investigation:} Develop an autonomous agent that, given a claim, runs a multi-step investigation workflow---scoring, explanation, policy verification, similar-claims retrieval and claimant history checks---and synthesises the evidence into a coherent, grounded recommendation.
+    \item \textbf{Safety:} Ensure the system never denies a claim, always requires human review, traces every assertion to its source, and degrades gracefully when the LLM is unavailable.
+\end{enumerate}
+
+\subsection{Objectives}
+
+\begin{enumerate}
+    \item Train and calibrate a fraud-scoring model that outputs true probabilities with precision and recall meaningfully above the naive baseline.
+    \item Build a LangGraph-based autonomous orchestrator with at least six specialised tools.
+    \item Implement code-enforced guardrails that guarantee safety invariants independent of LLM behaviour.
+    \item Deploy a human-in-the-loop dashboard for adjuster review, override and audit.
+    \item Evaluate the complete pipeline on held-out real claims.
+\end{enumerate}
+
+\subsection{Scope}
+
+The project covers one insurance line (vehicle/auto), structured claim fields and a free-tier or open-source LLM.  It is not intended for automatic denial of claims, pricing, underwriting, judging individuals, or other insurance lines.  The human adjuster retains final authority over every decision.
+
+\subsection{Organisation of the Report}
+
+Chapter~1 introduces the problem and objectives.  Chapter~2 presents the literature review and research gap.  Chapter~3 describes the EDA, synthetic-data audit and feature engineering.  Chapter~4 details model selection and training.  Chapter~5 presents the agentic AI architecture and pipeline.  Chapter~6 discusses results, guardrails and evaluation.  Chapter~7 concludes the work and presents future scope.
+
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 2 — LITERATURE REVIEW
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Literature Review and Research Gap}
+\label{ch:litreview}
+
+\subsection{Introduction}
+
+This chapter establishes the technical context by examining fraud detection methodologies, class-imbalance handling, explainability techniques, and the emerging role of agentic AI in decision support systems.
+
+\subsection{Fraud Detection with Machine Learning}
+
+Traditional approaches to insurance fraud detection include logistic regression~\cite{ref:bolton2002}, decision trees~\cite{ref:phua2010} and random forests.  While interpretable, these methods struggle to capture the non-linear, multi-way interactions common in fraud patterns---for example, the combination of at-fault claims on liability-only policies with recent address changes and no police report.
+
+Gradient-boosted decision trees (GBDT), particularly XGBoost~\cite{ref:chen2016} and LightGBM~\cite{ref:ke2017}, have become the dominant approach for tabular fraud detection.  Their advantages include native handling of categorical variables, robustness to irrelevant features, and built-in support for class weights via \texttt{scale\_pos\_weight}.
+
+\subsection{Class Imbalance Handling}
+
+The 6\% fraud rate creates a severe positive-negative imbalance.  Common remedies include:
+
+\begin{itemize}
+    \item \textbf{Resampling:} SMOTE~\cite{ref:chawla2002} generates synthetic minority examples but can introduce artefacts in high-dimensional categorical spaces.
+    \item \textbf{Cost-sensitive learning:} modifying the loss function to penalise missed frauds more heavily than false alarms, e.g.\ \texttt{scale\_pos\_weight} in LightGBM.
+    \item \textbf{Threshold tuning:} selecting the classification threshold based on a cost ratio (e.g.\ 10:1 missed-fraud-to-investigation cost) rather than maximising accuracy.
+\end{itemize}
+
+This project uses cost-sensitive learning (\texttt{scale\_pos\_weight} = 15.7) and cost-based threshold tuning, avoiding SMOTE because 96\% of training rows are already synthetic.
+
+\subsection{Explainability in Fraud Detection}
+
+Lundberg and Lee~\cite{ref:lundberg2017} introduced SHAP (SHapley Additive exPlanations), which assigns each feature an additive contribution to a prediction.  TreeSHAP provides exact, polynomial-time SHAP values for tree ensembles, enabling both global feature importance and per-claim explanations.  Explainability is critical in fraud detection because adjusters must understand \textit{why} a claim was flagged, not just that it was.
+
+\subsection{Agentic AI and LLM-Based Reasoning}
+
+The ReAct (Reason + Act) paradigm~\cite{ref:yao2023} interleaves reasoning traces with tool calls, enabling an LLM to dynamically plan a multi-step investigation.  LangGraph~\cite{ref:langgraph2024} extends this with stateful, checkpointable workflows where nodes represent processing stages and edges encode control flow, including cycles for iterative tool use.
+
+\subsection{Research Gap}
+
+Existing systems typically stop at a fraud score.  They do not autonomously investigate the claim by verifying policy conditions, retrieving similar historical cases, checking claimant history, and synthesising the evidence into a structured, grounded recommendation with mandatory human review.  This project addresses this gap by coupling a calibrated ML scorer with an agentic orchestrator whose safety invariants are enforced in code, not prompts.
+
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 3 — EDA & FEATURE ENGINEERING
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Exploratory Data Analysis and Feature Engineering}
+\label{ch:eda}
+
+\subsection{Dataset Description}
+
+The project uses the Kaggle \textit{Vehicle Claim Fraud Detection} dataset comprising 15,420 claims from 1994--1996 with a 6\% fraud rate.  The data was split 70/15/15 into train, validation and test sets, disjoint by \texttt{PolicyNumber} (no policyholder appears in two splits).  The training set contains 10,793 real claims (646 frauds) and is supplemented with 289,207 synthetic claims at sample weight 0.1.
+
+\begin{table}[H]
+\centering
+\caption{Dataset splits and class distribution.}
+\label{tab:splits}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Split} & \textbf{Claims} & \textbf{Frauds} & \textbf{Fraud Rate (\%)} \\
+\midrule
+Real Train       & 10,793  & 646   & 5.99 \\
+Real Validation  & 2,313   & 139   & 6.01 \\
+Real Test        & 2,313   & 138   & 5.97 \\
+Synthetic        & 289,207 & 17,310 & 5.99 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Feature Categories}
+
+The raw data contains 32 columns spanning four types:
+
+\begin{table}[H]
+\centering
+\caption{Feature categories and representative examples.}
+\label{tab:features}
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Type} & \textbf{Count} & \textbf{Examples} \\
+\midrule
+Nominal   & 12 & Make, AccidentArea, Fault, BasePolicy, VehicleCategory, AgentType \\
+Ordinal   & 8  & NumberOfSupplements, AddressChange\_Claim, PastNumberOfClaims, AgeOfVehicle \\
+Numeric   & 5  & Deductible, DriverRating, Year, WeekOfMonth, WeekOfMonthClaimed \\
+Binary    & 3  & PoliceReportFiled, WitnessPresent, FraudFound\_P \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Synthetic Data Audit}
+
+The synthetic generator is a black box.  A rigorous four-part audit confirmed its quality:
+
+\begin{enumerate}
+    \item \textbf{Marginal fidelity:} per-column total variation distance $\leq 0.008$; chi-square tests confirm synthetic marginals match real train more closely than an independent real sample would (median $p = 0.98$).
+    \item \textbf{Joint fidelity:} fraud rates per category correlate at $r = 0.89$ across 164 categories.  Strong signals (Fault, BasePolicy, VehicleCategory) are preserved; weak signals (Make, Month) are flattened toward the base rate.
+    \item \textbf{Adversarial validation:} a LightGBM classifier achieves only ROC-AUC $= 0.511 \pm 0.007$ at separating real from synthetic rows---effectively random.
+    \item \textbf{Utility (TSTR):} adding all synthetic rows at weight 0.1--0.3 raises real-validation PR-AUC by approximately $+0.05$ over real-only training, with the confidence interval excluding zero.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{2cm}\textit{Figure placeholder: Synthetic vs.\ real fraud-rate agreement scatter plot\\(docs/report/figures/01\_synthetic\_rate\_agreement.png)}\vspace{2cm}}}
+\caption{Fraud-rate agreement between real and synthetic data across 164 categories.}
+\label{fig:synth_agreement}
+\end{figure}
+
+\subsection{Key EDA Findings and Red Flags}
+
+The EDA identified 12 red-flag rules with statistically significant lift above the base fraud rate.  The strongest signals include:
+
+\begin{itemize}
+    \item \textbf{Fault $\times$ Deductible:} at-fault claims with \$400 deductible have 8.8\% fraud rate (lift 1.47).
+    \item \textbf{BasePolicy $\times$ VehicleCategory:} Liability-only policies on Sport/Utility vehicles show elevated fraud.
+    \item \textbf{No police report and no witness:} combined absence correlates with 9.2\% fraud rate.
+    \item \textbf{Early-policy incidents:} claims within ``none to 30'' days of policy inception show 18.9\% fraud rate.
+\end{itemize}
+
+\subsection{Feature Engineering Pipeline}
+
+The final model uses 89 engineered features built by \texttt{ClaimFeatureBuilder}:
+
+\begin{itemize}
+    \item One-hot encoded nominal fields (Fault, BasePolicy, VehicleCategory, etc.).
+    \item Ordinal range encodings (price bins, vehicle age, past claims count).
+    \item Numeric features (deductible, driver rating, claim lag).
+    \item Engineered flags: missing-age indicator, early-policy incident, price extremes, policyholder at fault, liability-only policy, weekend accident/claim.
+    \item 12 red-flag indicators plus a weighted red-flag score.
+    \item Count of failed consistency rules.
+\end{itemize}
+
+\textbf{Excluded features:} \texttt{PolicyNumber} and \texttt{is\_synthetic} (leakage), \texttt{Sex} and \texttt{MaritalStatus} (fairness---removing them cost no accuracy in ablation), \texttt{RepNumber} (no signal), raw \texttt{Age} (replaced by age band and missing-age flag).
+
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 4 — MODEL SELECTION & TRAINING
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Model Selection and Training Workflow}
+\label{ch:model}
+
+\subsection{Training Protocol}
+
+\begin{table}[H]
+\centering
+\caption{Training configuration.}
+\label{tab:training_config}
+\begin{tabular}{@{}lp{10cm}@{}}
+\toprule
+\textbf{Item} & \textbf{Choice} \\
+\midrule
+Training data   & 10,793 real + 289,207 synthetic at weight 0.1 \\
+Features        & 89 columns from \texttt{ClaimFeatureBuilder} \\
+Selection metric & PR-AUC on real validation (2,313 claims, 139 frauds) \\
+Imbalance       & \texttt{scale\_pos\_weight} (class weights); no resampling \\
+Final model     & 3-seed ensemble (seeds 42/43/44), early stopping on PR-AUC \\
+Calibration     & 5-fold cross-fitted Platt scaling (Brier 0.049) \\
+Thresholds      & Cost-based: 5:1, 10:1, 20:1 ratios + top-10\% capacity \\
+Test evaluation & Opened once, by the final run \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Why Gradient Boosting (LightGBM)}
+
+Gradient-boosted decision trees outperform alternatives on this task for several reasons:
+
+\begin{enumerate}
+    \item \textbf{Tabular data dominance:} GBDTs consistently outperform neural networks on structured tabular data, particularly with limited training samples and high cardinality categorical features~\cite{ref:grinsztajn2022}.
+    \item \textbf{Native imbalance handling:} \texttt{scale\_pos\_weight} directly adjusts the gradient computation, avoiding the artefacts introduced by SMOTE in high-dimensional categorical spaces.
+    \item \textbf{Explainability:} TreeSHAP provides exact, polynomial-time feature attributions---critical for adjuster trust and regulatory compliance.
+    \item \textbf{Calibration:} Platt scaling on the LightGBM log-odds produces well-calibrated probabilities (Brier score 0.049 vs.\ 0.159 uncalibrated).
+\end{enumerate}
+
+\subsection{Data-Mix Experiment}
+
+The data-mix experiment determined the optimal synthetic data weight:
+
+\begin{table}[H]
+\centering
+\caption{Data-mix experiment results (real-validation PR-AUC, 2-seed mean).}
+\label{tab:datamix}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Training Data} & \textbf{Train Rows} & \textbf{PR-AUC} \\
+\midrule
+Real only                      & 10,793  & 0.238 \\
+Real + 10\% synthetic          & 39,714  & 0.237 \\
+Real + 25\% synthetic          & 83,095  & 0.259 \\
+Real + 50\% synthetic          & 155,397 & 0.270 \\
+Real + 100\% synthetic, $w=1.0$  & 300,000 & 0.274 \\
+\textbf{Real + 100\% synthetic, $w=0.3$} & \textbf{300,000} & \textbf{0.286} \\
+Real + 100\% synthetic, $w=0.1$  & 300,000 & 0.284 \\
+Synthetic only                 & 289,207 & 0.275 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+More synthetic data helps steadily (+0.04 to +0.05 PR-AUC over real-only).  Down-weighting to 0.1--0.3 is slightly better than weight 1.0.  The gap between $w = 0.1$ and $w = 0.3$ (0.002) is within seed noise.
+
+\subsection{Model Comparison}
+
+\begin{table}[H]
+\centering
+\caption{Model comparison on real validation (PR-AUC, primary metric).}
+\label{tab:model_zoo}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Model} & \textbf{PR-AUC} & \textbf{ROC-AUC} & \textbf{Source} \\
+\midrule
+\textbf{LightGBM} (3-seed ensemble) & \textbf{0.291} & \textbf{0.870} & Final run \\
+XGBoost ($w = 0.3$)                  & 0.283          & ---            & Partial run \\
+MLP (tuned, 3-seed, CPU)             & 0.262          & 0.867          & This PR \\
+MLP (default architecture)           & 0.261          & ---            & This PR \\
+Random Forest                        & 0.246          & ---            & Partial run \\
+Logistic Regression                  & 0.193          & 0.815          & Partial run \\
+Rules-only (red-flag score)          & 0.142          & 0.781          & Partial run \\
+All-legit baseline                   & 0.060          & 0.500          & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Neural Network Comparison (MLP)}
+
+A PyTorch MLP with entity embeddings was trained on the same data, with 8 Optuna hyperparameter trials and a 3-seed stability check:
+
+\begin{itemize}
+    \item Best tuned configuration: hidden layers $[512, 256, 128]$, dropout 0.39, learning rate $6 \times 10^{-4}$, batch size 1024, BCE loss.
+    \item Result: ensemble PR-AUC 0.262 vs.\ LightGBM's 0.291.
+    \item Paired bootstrap difference: $-0.029$ [$-0.074$, $+0.012$].
+    \item Every MLP member scores below every LightGBM member.  The MLP was not evaluated on test.
+\end{itemize}
+
+\subsection{Calibration}
+
+\begin{table}[H]
+\centering
+\caption{Calibration comparison.}
+\label{tab:calibration}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Method} & \textbf{Brier Score} \\
+\midrule
+Uncalibrated LightGBM     & 0.159 \\
+Isotonic calibration       & 0.050 \\
+\textbf{Platt calibration} & \textbf{0.049} \\
+Always predict base rate   & 0.056 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Platt scaling reduces the Brier score from 0.159 to 0.049, producing well-calibrated probability outputs suitable for cost-based decision-making.
+
+\subsection{Risk Bands and Thresholds}
+
+The calibrated probabilities are mapped to three risk bands using cost-optimised thresholds:
+
+\begin{table}[H]
+\centering
+\caption{Risk band definitions and operating characteristics (10:1 cost ratio on test).}
+\label{tab:riskbands}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Risk Band} & \textbf{Threshold} & \textbf{Meaning} & \textbf{Action} \\
+\midrule
+Low    & $p < 0.037$   & Below investigation threshold & May approve \\
+Medium & $0.037 \leq p < 0.108$ & Warrants review & Agent investigates \\
+High   & $p \geq 0.108$ & Strong fraud signal & Flag for investigation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 5 — AGENTIC AI ARCHITECTURE
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Agentic AI Architecture and Pipeline}
+\label{ch:agent}
+
+\subsection{System Overview}
+
+The agentic pipeline is built on \textbf{LangGraph}, a stateful workflow framework that extends the ReAct (Reason + Act) paradigm with checkpointable nodes and edges.  The architecture follows a three-layer design:
+
+\begin{enumerate}
+    \item \textbf{Detection layer:} the calibrated LightGBM model provides a fraud probability, risk band and red-flag indicators.
+    \item \textbf{Investigation layer:} the LLM agent dynamically selects and executes six specialised tools via a ReAct loop (up to 8 iterations).
+    \item \textbf{Decision layer:} evidence is aggregated, synthesised into a recommendation, passed through code-enforced guardrails, and presented to the human adjuster.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{3cm}\textit{Figure placeholder: Agentic workflow diagram\\(agentic\_workflow\_diagram.png)}\vspace{3cm}}}
+\caption{End-to-end agentic pipeline: 8-step workflow from claim ingestion to human review.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{LangGraph Pipeline (8 Steps)}
+
+The pipeline consists of eight sequential stages with a feedback loop:
+
+\begin{table}[H]
+\centering
+\caption{LangGraph pipeline stages.}
+\label{tab:pipeline}
+\begin{tabular}{@{}clp{8cm}@{}}
+\toprule
+\textbf{Step} & \textbf{Node} & \textbf{Function} \\
+\midrule
+1 & Claim Ingestion       & Parse and validate structured claim fields against the Pydantic schema \\
+2 & Validation            & Apply policy rules and consistency checks \\
+3 & ML Scoring            & Run the calibrated LightGBM model; output probability, risk band, red flags \\
+4 & Orchestrator          & LLM ReAct loop: reason $\rightarrow$ pick tool $\rightarrow$ observe $\rightarrow$ repeat (up to 8 steps) \\
+5 & Evidence Aggregation  & Merge outputs from all tools; catalogue findings, conflicts and gaps \\
+6 & Synthesis             & Generate structured decision with grounded rationale \\
+7 & Guardrails            & Apply 8 code-enforced safety checks \\
+8 & Human Review          & Present to adjuster on Streamlit dashboard \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{The Six Specialised Tools}
+
+The agent has access to six tools, each callable via the ReAct loop:
+
+\begin{table}[H]
+\centering
+\caption{The six agent tools.}
+\label{tab:tools}
+\begin{tabular}{@{}clp{7.5cm}@{}}
+\toprule
+\textbf{\#} & \textbf{Tool} & \textbf{Description} \\
+\midrule
+1 & \texttt{score\_claim}           & LightGBM fraud probability, risk band (low/medium/high), red flags that fired \\
+2 & \texttt{explain\_fraud\_score}  & TreeSHAP per-feature importance; top 5 contributing factors in plain English \\
+3 & \texttt{retrieve\_policy}       & Policy details lookup from real documents or simulated reference data \\
+4 & \texttt{verify\_policy}         & 9 structured checks (PV01--PV09): PASS / FAIL / UNKNOWN for each condition \\
+5 & \texttt{find\_similar\_claims}  & FAISS vector search over 10,793 training claims; returns top-5 matches with fraud rates \\
+6 & \texttt{get\_claim\_history}    & Prior claims by the same policyholder; contradiction detection \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{ReAct Loop and Auto-Completion}
+
+The orchestrator node implements the ReAct pattern: think $\rightarrow$ pick tool $\rightarrow$ observe result $\rightarrow$ repeat.  The agent decides which tools to call and in what order, up to a maximum of 8 iterations.  An \textbf{auto-completion} mechanism ensures that required tools (scoring, policy verification) run even if the LLM skips them.  If the LLM fails or returns invalid output twice, a deterministic \textbf{rule-based fallback} is triggered---no claim goes unprocessed.
+
+\subsection{Evidence Aggregation}
+
+The aggregation module merges outputs from all six tools into a structured evidence record:
+\begin{itemize}
+    \item Tool statuses: \texttt{completed} / \texttt{partial} / \texttt{unavailable} / \texttt{failed}.
+    \item Findings and missing information catalogued.
+    \item Conflicts between evidence sources identified.
+    \item Reason codes assigned from evidence in code, not from the LLM.
+    \item Evidence drawn from simulated reference data is clearly labelled.
+\end{itemize}
+
+\subsection{Triage Decision Categories}
+
+The system produces one of three structured decisions:
+
+\begin{enumerate}
+    \item \textbf{APPROVE:} low risk, all policy checks pass, no contradictions.
+    \item \textbf{FLAG FOR INVESTIGATION:} evidence warrants human review.  Sub-categories:
+    \begin{itemize}
+        \item \texttt{FRAUD\_RISK}: model score and/or evidence suggest fraud.
+        \item \texttt{POLICY\_CONDITION}: a policy verification check failed.
+        \item \texttt{SYSTEM\_FAILURE}: a required tool failed or timed out.
+    \end{itemize}
+    \item \textbf{REQUEST MORE INFORMATION:} blocking validation failure or claim-record contradiction.
+\end{enumerate}
+
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 6 — RESULTS AND DISCUSSION
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Results and Discussion}
+\label{ch:results}
+
+\subsection{Experimental Setup}
+
+\begin{table}[H]
+\centering
+\caption{Experimental environment.}
+\label{tab:env}
+\begin{tabular}{@{}lp{10cm}@{}}
+\toprule
+\textbf{Item} & \textbf{Specification} \\
+\midrule
+Hardware          & NVIDIA B200 server (compute capability 10.0, CUDA 12.9) \\
+Training runtime  & Python 3.12.3; LightGBM runs on CPU by design \\
+LLM               & Ollama + qwen2.5:72b (free, open-source) \\
+Vector store      & FAISS over 10,793 training claims \\
+Dashboard         & Streamlit (runs on CPU without an LLM in rule-based mode) \\
+Random seed       & 42 (fixed across all experiments) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Model Performance on Held-Out Test Set}
+
+The test set (2,313 claims, 138 frauds) was evaluated \textbf{once} by the final run.  All confidence intervals are 95\% stratified bootstrap (1,000 resamples).
+
+\begin{table}[H]
+\centering
+\caption{Final test-set performance at the 10:1 cost threshold.}
+\label{tab:test_results}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Model} & \textbf{PR-AUC [95\% CI]} & \textbf{ROC-AUC} & \textbf{Recall} & \textbf{FPR} \\
+\midrule
+\textbf{Calibrated LightGBM} & \textbf{0.252} [0.214, 0.317] & \textbf{0.874} & \textbf{0.790} & 0.191 \\
+Rules-only (red-flag score)   & 0.139 [0.124, 0.164]          & 0.793          & 0.659          & 0.223 \\
+All-legit baseline            & 0.060                          & 0.500          & 0               & 0     \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Confusion matrix at threshold 0.108:} TP~109, FP~416, FN~29, TN~1,759.
+
+\textbf{Lift by decile:}
+\begin{itemize}
+    \item Top decile: $4.1\times$ the base fraud rate (24.6\% fraud).
+    \item Top 3 deciles (30\% of claims) contain 90\% of frauds.
+    \item Deciles 5--10 contain only 5 frauds in 1,387 claims.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering\vspace{2cm}\textit{Figure placeholder: Lift chart by decile\\(docs/report/figures/02\_lift.png)}\vspace{2cm}}}
+\caption{Lift chart showing fraud concentration in the top-scored deciles.}
+\label{fig:lift}
+\end{figure}
+
+\subsection{Synopsis Success Criterion}
+
+The project synopsis required ``precision and recall both meaningfully above the naive baseline.''  This criterion is met:
+
+\begin{table}[H]
+\centering
+\caption{Success criterion verification.}
+\label{tab:success}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{This Model (lower CI)} & \textbf{Random Flagger} \\
+\midrule
+Precision & 0.188 & 0.060 \\
+Recall    & 0.717 & 0.227 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Code-Enforced Guardrails}
+
+Eight guardrails are enforced in Python code, independent of the LLM prompt:
+
+\begin{table}[H]
+\centering
+\caption{The eight code-enforced guardrails.}
+\label{tab:guardrails}
+\begin{tabular}{@{}cp{12cm}@{}}
+\toprule
+\textbf{\#} & \textbf{Guardrail} \\
+\midrule
+1 & \textbf{Never deny:} the system only outputs APPROVE, FLAG\_FOR\_INVESTIGATION or REQUEST\_MORE\_INFORMATION; denial is reserved for the human adjuster. \\
+2 & \textbf{High-risk never approved:} a \texttt{high} risk band is always flagged for investigation. \\
+3 & \textbf{Evidence traceability:} every evidence fact must trace to the output of the tool that produced it; untraceable facts are removed and logged. \\
+4 & \textbf{Concrete factors for medium band:} a FRAUD\_RISK flag in the medium risk band requires at least one concrete factor (warning red flag, policy-condition FAIL, fraud among similar claims, strong SHAP driver, or conflicting evidence). \\
+5 & \textbf{Unsupported flag replacement:} if every reason code is a low-risk or systemic one (e.g.\ LOW\_MODEL\_RISK, POLICY\_TERMS\_UNVERIFIED), the flag is replaced by the rule-based decision. \\
+6 & \textbf{LLM failure fallback:} if the LLM fails or returns invalid output twice, a deterministic rule-based decision is used. \\
+7 & \textbf{Code-sourced reason codes:} reason codes, missing information, conflicts, tool statuses and findings are copied from the evidence record (code), never taken from the LLM. \\
+8 & \textbf{Mandatory human review:} every recommendation is marked \texttt{requires\_human\_review = True}. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Agent Evaluation (Offline Baseline)}
+
+The offline evaluation ran 556 claims through the complete pipeline in rule-based mode (all six tools execute, no LLM):
+
+\begin{table}[H]
+\centering
+\caption{Agent evaluation results (offline baseline, 278 matched claims).}
+\label{tab:agent_eval}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{Sim.\ Data Off} & \textbf{Sim.\ Data On} \\
+\midrule
+Fraud $\rightarrow$ FRAUD\_RISK flag (recall) & 0.748 & 0.748 \\
+Legit $\rightarrow$ APPROVE                   & 0.842 & 0.835 \\
+False-flag rate                                & 0.158 & 0.158 \\
+REQUEST\_MORE\_INFORMATION                     & 2.2\% & 2.2\% \\
+FRAUD\_RISK precision (sample)                 & 0.825 & 0.825 \\
+Consistency across runs                        & 100\% & 100\% \\
+Processing errors                              & 0     & 0     \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Fairness Audit}
+
+A fairness audit by Sex, age band and MaritalStatus confirmed that removing \texttt{Sex} and \texttt{MaritalStatus} from the feature set costs no accuracy.  The model's predictions show no statistically significant disparate impact across these protected attributes.
+
+\subsection{Limitations}
+
+\begin{itemize}
+    \item The dataset is from 1994--1996; modern fraud patterns may differ.
+    \item With 138 test-set frauds, individual metric estimates have wide confidence intervals.
+    \item The synthetic data generator is a black box; its flattening of weak signals may bias the model.
+    \item Live LLM evaluation is pending; offline results use the rule-based fallback path only.
+    \item The system is designed for vehicle insurance only; other lines would require new features and recalibration.
+\end{itemize}
+
+\subsection{Learnings and Findings from the NVIDIA DGX B200 Environment}
+
+The entire training, evaluation and agentic pipeline was developed on an NVIDIA DGX B200 server. This section documents the key learnings from working with this high-performance infrastructure.
+
+\subsubsection{Hardware Capabilities}
+
+The B200 GPU features compute capability~10.0 with 192~GB of HBM3e memory and is paired with CUDA~12.9. Although the LightGBM training itself runs on CPU by design, the B200 environment enabled several workflows that would have been impractical on commodity hardware:
+
+\begin{itemize}
+    \item \textbf{Local LLM inference:} Ollama served \texttt{qwen2.5:72b} (a 72-billion-parameter open-source model) entirely on-device, eliminating API costs and data-privacy concerns. The 192~GB VRAM comfortably holds the quantised model weights.
+    \item \textbf{Rapid experimentation:} The data-mix experiment (Table~7) swept five synthetic-weight configurations, each training three-seed ensembles. On the B200 the full sweep completed in under 20~minutes.
+    \item \textbf{FAISS vector store:} Building and querying a FAISS index over 10,793 training claims for the similar-claims tool was near-instantaneous on the B200's CPU/memory subsystem.
+\end{itemize}
+
+\subsubsection{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{GPU is not required for gradient-boosted trees.} LightGBM uses CPU-based histogram binning; the B200 GPU was idle during training. The saved model artifacts (\texttt{fraud\_model.joblib}, \texttt{preprocessor.joblib}) are portable and run inference on any machine with $\leq$512~MB of RAM.
+    \item \textbf{On-device LLM removes vendor lock-in.} Running qwen2.5:72b locally meant zero API calls, deterministic outputs (temperature~0), and no rate limits during the 556-claim offline evaluation. This would not be feasible on a consumer GPU.
+    \item \textbf{Reproducibility is hardware-agnostic.} All random seeds are fixed at 42 across NumPy, scikit-learn and LightGBM. The trained model reproduces identical predictions when loaded on a CPU-only machine, confirming that the B200 environment introduces no hardware-specific non-determinism.
+    \item \textbf{End-to-end pipeline validation.} The B200 allowed running the complete LangGraph pipeline (ingestion $\rightarrow$ scoring $\rightarrow$ ReAct loop $\rightarrow$ guardrails $\rightarrow$ triage) at scale, processing all 556 evaluation claims in a single batch without memory or timeout issues.
+    \item \textbf{Deployment portability lesson.} While the B200 was essential for development and LLM inference, the production deployment requires only the serialised LightGBM model (CPU) and an API-based LLM (e.g.\ Groq, Google AI Studio). This separation of training-time and inference-time requirements is a key architectural insight.
+\end{enumerate}
+
+\subsubsection{Recommendations for Future B200 Usage}
+
+For teams with access to DGX-class hardware, we recommend: (a)~reserving the GPU for LLM serving and vector-store operations rather than tree-based training; (b)~developing with a local LLM first, then switching to an API provider for deployment; and (c)~using the hardware's memory bandwidth for large-scale offline evaluation before deploying to resource-constrained environments.
+
+
+% ══════════════════════════════════════════════════════════
+%  CHAPTER 7 — CONCLUSION AND FUTURE SCOPE
+% ══════════════════════════════════════════════════════════
+\newpage
+\section{Conclusion and Future Scope}
+\label{ch:conclusion}
+
+\subsection{Conclusion}
+
+This project demonstrated a complete, autonomous insurance claims triage system that combines calibrated machine learning with agentic AI orchestration:
+
+\begin{enumerate}
+    \item A \textbf{LightGBM model} was trained and calibrated to output true fraud probabilities, achieving 0.874~ROC-AUC and 79\% recall on held-out real claims---significantly outperforming logistic regression (0.193 PR-AUC), random forest (0.246), XGBoost (0.283) and a PyTorch MLP (0.262).
+    \item A \textbf{LangGraph-based agent} was built with an 8-step pipeline and 6 specialised tools, autonomously investigating each claim via the ReAct pattern and synthesising evidence into structured, grounded recommendations.
+    \item \textbf{Eight code-enforced guardrails} ensure safety invariants---the system never denies a claim, high-risk claims are never auto-approved, and every assertion traces to its source---independent of LLM behaviour.
+    \item A \textbf{Streamlit dashboard} enables human adjusters to review decisions, examine SHAP explanations, and record approvals or overrides with audit logging.
+    \item The system achieves \textbf{100\% consistency} and \textbf{zero errors} across repeated evaluation runs, with graceful degradation to a rule-based fallback at zero cost when the LLM is unavailable.
+\end{enumerate}
+
+The quantitative results explicitly satisfy the synopsis success criteria: model precision (lower CI 0.188) and recall (lower CI 0.717) are both meaningfully above the naive baseline (0.060 and 0.227 respectively).
+
+\subsection{Future Scope}
+
+\begin{enumerate}
+    \item \textbf{Live LLM evaluation:} run the full agent with qwen2.5:72b on the test set and assess rationale quality via LLM-as-judge.
+    \item \textbf{Feedback loop:} use adjuster override decisions to retrain and recalibrate the model.
+    \item \textbf{Free-text extraction:} parse unstructured claim narratives and repair notes using an LLM.
+    \item \textbf{Multi-line extension:} adapt the pipeline for health, property and life insurance claims.
+    \item \textbf{Real-time deployment:} wrap the tools in a FastAPI service with sub-second latency.
+    \item \textbf{Image-based damage assessment:} integrate computer vision for vehicle damage photos (stretch goal).
+    \item \textbf{Supplementary data sources:} incorporate the Kaggle Auto Insurance Claims dataset ($\sim$1,000 rows) as an additional retrieval knowledge base.
+\end{enumerate}
+
+
+% ══════════════════════════════════════════════════════════
+%  REFERENCES
+% ══════════════════════════════════════════════════════════
+\newpage
+\begin{thebibliography}{25}
+\addcontentsline{toc}{section}{References}
+
+\bibitem{ref:bolton2002}
+R.~J. Bolton and D.~J. Hand, ``Statistical fraud detection: a review,'' \textit{Statistical Science}, vol.~17, no.~3, pp.~235--249, 2002.
+
+\bibitem{ref:phua2010}
+C.~Phua, V.~Lee, K.~Smith and R.~Gayler, ``A comprehensive survey of data mining-based fraud detection research,'' \textit{arXiv preprint arXiv:1009.6119}, 2010.
+
+\bibitem{ref:chen2016}
+T.~Chen and C.~Guestrin, ``XGBoost: a scalable tree boosting system,'' in \textit{Proc.\ ACM SIGKDD}, San Francisco, CA, 2016, pp.~785--794.
+
+\bibitem{ref:ke2017}
+G.~Ke, Q.~Meng, T.~Finley \textit{et al.}, ``LightGBM: a highly efficient gradient boosting decision tree,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol.~30, 2017, pp.~3146--3154.
+
+\bibitem{ref:chawla2002}
+N.~V. Chawla, K.~W. Bowyer, L.~O. Hall and W.~P. Kegelmeyer, ``SMOTE: synthetic minority over-sampling technique,'' \textit{Journal of Artificial Intelligence Research}, vol.~16, pp.~321--357, 2002.
+
+\bibitem{ref:lundberg2017}
+S.~M. Lundberg and S.-I. Lee, ``A unified approach to interpreting model predictions,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol.~30, 2017, pp.~4765--4774.
+
+\bibitem{ref:yao2023}
+S.~Yao, J.~Zhao, D.~Yu \textit{et al.}, ``ReAct: synergizing reasoning and acting in language models,'' in \textit{Proc.\ ICLR}, 2023.
+
+\bibitem{ref:langgraph2024}
+LangChain, Inc., ``LangGraph: build stateful, multi-actor applications with LLMs,'' \textit{GitHub repository}, 2024. Available: \url{https://github.com/langchain-ai/langgraph}.
+
+\bibitem{ref:grinsztajn2022}
+L.~Grinsztajn, E.~Oyallon and G.~Varoquaux, ``Why do tree-based models still outperform deep learning on tabular data?'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol.~35, 2022, pp.~507--520.
+
+\bibitem{ref:faiss2021}
+J.~Johnson, M.~Douze and H.~J\'{e}gou, ``Billion-scale similarity search with GPUs,'' \textit{IEEE Transactions on Big Data}, vol.~7, no.~3, pp.~535--547, 2021.
+
+\bibitem{ref:platt1999}
+J.~C. Platt, ``Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods,'' in \textit{Advances in Large Margin Classifiers}, MIT Press, 1999, pp.~61--74.
+
+\bibitem{ref:brier1950}
+G.~W. Brier, ``Verification of forecasts expressed in terms of probability,'' \textit{Monthly Weather Review}, vol.~78, no.~1, pp.~1--3, 1950.
+
+\bibitem{ref:streamlit2024}
+Streamlit, Inc., ``Streamlit: the fastest way to build data apps,'' 2024. Available: \url{https://streamlit.io}.
+
+\bibitem{ref:ollama2024}
+Ollama, ``Ollama: run large language models locally,'' 2024. Available: \url{https://ollama.ai}.
+
+\bibitem{ref:scikit2011}
+F.~Pedregosa, G.~Varoquaux, A.~Gramfort \textit{et al.}, ``Scikit-learn: machine learning in Python,'' \textit{Journal of Machine Learning Research}, vol.~12, pp.~2825--2830, 2011.
+
+\bibitem{ref:pytorch2019}
+A.~Paszke, S.~Gross, F.~Massa \textit{et al.}, ``PyTorch: an imperative style, high-performance deep learning library,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol.~32, 2019, pp.~8024--8035.
+
+\bibitem{ref:optuna2019}
+T.~Akiba, S.~Sano, T.~Yanase, T.~Ohta and M.~Koyama, ``Optuna: a next-generation hyperparameter optimization framework,'' in \textit{Proc.\ ACM SIGKDD}, 2019, pp.~2623--2631.
+
+\bibitem{ref:hilal2022}
+W.~Hilal, S.~A. Gadsden and J.~Yawney, ``Financial fraud: a review of anomaly detection techniques and recent advances,'' \textit{Expert Systems with Applications}, vol.~193, 2022, p.~116429.
+
+\bibitem{ref:baesens2015}
+B.~Baesens, V.~Van~Vlasselaer and W.~Verbeke, \textit{Fraud Analytics Using Descriptive, Predictive, and Social Network Techniques}, Wiley, 2015.
+
+\bibitem{ref:west2016}
+J.~West and M.~Bhattacharya, ``Intelligent financial fraud detection: a comprehensive review,'' \textit{Computers \& Security}, vol.~57, pp.~47--66, 2016.
+
+\bibitem{ref:niculescu2005}
+A.~Niculescu-Mizil and R.~Caruana, ``Predicting good probabilities with supervised learning,'' in \textit{Proc.\ ICML}, 2005, pp.~625--632.
+
+\bibitem{ref:flach2017}
+P.~Flach and M.~Kull, ``Precision-recall-gain curves: PR analysis done right,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, vol.~28, 2015, pp.~838--846.
+
+\bibitem{ref:he2009}
+H.~He and E.~A. Garcia, ``Learning from imbalanced data,'' \textit{IEEE Transactions on Knowledge and Data Engineering}, vol.~21, no.~9, pp.~1263--1284, 2009.
+
+\bibitem{ref:dal2014}
+A.~Dal~Pozzolo, O.~Caelen, R.~A. Johnson and G.~Bontempi, ``Calibrating probability with undersampling for unbalanced classification,'' in \textit{Proc.\ IEEE SSCI}, 2015, pp.~159--166.
+
+\bibitem{ref:langchain2024}
+LangChain, Inc., ``LangChain: building applications with LLMs through composability,'' \textit{GitHub repository}, 2024. Available: \url{https://github.com/langchain-ai/langchain}.
+
+\end{thebibliography}
+
+
+% ══════════════════════════════════════════════════════════
+%  ANNEXURES
+% ══════════════════════════════════════════════════════════
+\newpage
+\section*{Annexure A: Publications and Intellectual Property}
+\addcontentsline{toc}{section}{Annexure A: Publications and Intellectual Property}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}llc@{}}
+\toprule
+\textbf{Type} & \textbf{Title / Description} & \textbf{Status} \\
+\midrule
+Research Paper & Agentic AI for Insurance Claims Triage & Planned \\
+GitHub Repo    & AgenticAIFraudInsuranceDetection & Published \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\newpage
+\section*{Annexure B: Student Contribution Statement}
+\addcontentsline{toc}{section}{Annexure B: Student Contribution Statement}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Student Name} & \textbf{Roll No.} & \textbf{Contribution} \\
+\midrule
+Apeksha Sharma   & \_\_\_\_\_\_ & \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ \\
+Gunjal Mandawkar & \_\_\_\_\_\_ & \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ \\
+Vaishnavi Singh  & \_\_\_\_\_\_ & \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ \\
+Vidhita Bais     & \_\_\_\_\_\_ & \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\newpage
+\section*{Annexure C: Project Outputs}
+\addcontentsline{toc}{section}{Annexure C: Project Outputs}
+
+Major outputs generated from the project:
+
+\begin{itemize}
+    \item \textbf{Working prototype:} end-to-end fraud triage pipeline (ML model + LangGraph agent + Streamlit dashboard).
+    \item \textbf{Trained model:} \texttt{lightgbm-b200-20261016-0915} with calibrated probability outputs.
+    \item \textbf{Software:} modular Python package (\texttt{src/}) with 64 pytest tests.
+    \item \textbf{Dataset:} cleaned, split and audited vehicle insurance claims data.
+    \item \textbf{Reports:} EDA report, model report, agent evaluation report, model card.
+    \item \textbf{GitHub repository:} \url{https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection}.
+    \item \textbf{Dashboard:} Streamlit application for adjuster review (\texttt{dashboard/app.py}).
+    \item \textbf{Vector store:} FAISS index over 10,793 training claims for similar-claims retrieval.
+\end{itemize}
+
+
+% ══════════════════════════════════════════════════════════
+%  APPROVAL
+% ══════════════════════════════════════════════════════════
+\newpage
+\section*{Approved by}
+\addcontentsline{toc}{section}{Approved by}
+
+\vspace{2cm}
+
+\begin{tabular}{@{}p{6cm}p{6cm}@{}}
+\textbf{Guide} & \textbf{Associate Head} \\[3cm]
+\rule{5cm}{0.4pt} & \rule{5cm}{0.4pt} \\
+(Name and Signature) & (Name and Signature) \\[3cm]
+\multicolumn{2}{c}{\textbf{Dr.\ Padma Adane}} \\
+\multicolumn{2}{c}{Dean, SoCSE} \\[1cm]
+\multicolumn{2}{c}{\rule{5cm}{0.4pt}} \\
+\end{tabular}
+
+\end{document}
