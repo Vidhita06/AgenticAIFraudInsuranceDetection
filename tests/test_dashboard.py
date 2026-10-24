@@ -43,27 +43,34 @@ def test_runner_review_rules_and_audit(sample_claims, audit_path):
     assert adj[0]["override_reason"] == "documents verified" and adj[0]["investigation_id"] == d.investigation_id
 
 
+def _go(at, page):
+    [r for r in at.sidebar.radio if r.label == "Navigation"][0].set_value(page)
+    at.run()
+
+
 @needs_models
 def test_dashboard_end_to_end(audit_path, vector_store):
     pytest.importorskip("streamlit")
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(str(path_for("models_dir").parent / "dashboard" / "app.py"), default_timeout=300)
     at.run()
-    assert not at.exception and "Run an investigation" in at.info[0].value
-    [b for b in at.button if "Run investigation" in b.label][0].click()
+    assert not at.exception and any("No investigations recorded yet" in i.value for i in at.info)
+    _go(at, "New Investigation")
+    assert not at.exception
+    [b for b in at.button if b.label == "Run Investigation"][0].click()
     at.run()
     assert not at.exception
-    assert [h.value for h in at.header] == ["1 · Claim", "2 · Recommendation", "3 · Tool results", "4 · Your decision"]
+    assert any(m.value == "## Your Decision" for m in at.markdown)        # moved to the investigation page
     decision = [r for r in at.radio if r.label == "Decision"][0]
     recommended = decision.value
     other = next(x for x in ("APPROVE", "FLAG_FOR_INVESTIGATION") if x != recommended)
     decision.set_value(other)
-    [b for b in at.button if b.label == "Submit decision"][0].click()
+    [b for b in at.button if b.label == "Submit Decision"][0].click()
     at.run()
     assert any("reason" in e.value for e in at.error)                     # override without a reason refused
     [r for r in at.radio if r.label == "Decision"][0].set_value(other)
     [t for t in at.text_area if t.label.startswith("Override")][0].input("checked with the policyholder")
-    [b for b in at.button if b.label == "Submit decision"][0].click()
+    [b for b in at.button if b.label == "Submit Decision"][0].click()
     at.run()
     assert not at.exception and at.success and other in at.success[0].value
     rows = sqlite3.connect(audit_path).execute(
@@ -80,8 +87,11 @@ def test_dashboard_llm_mode_without_configuration_explains_and_stops(audit_path,
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     at = AppTest.from_file(str(path_for("models_dir").parent / "dashboard" / "app.py"), default_timeout=120)
     at.run()
-    [r for r in at.radio if r.label == "Agent"][0].set_value("LLM from .env")
+    [r for r in at.sidebar.radio if r.label == "Agent Mode"][0].set_value("LLM from .env")
     at.run()
     assert not at.exception
     assert any("No API key" in e.value for e in at.sidebar.error)
-    assert any("Rule-based" in e.value for e in at.error)
+    _go(at, "New Investigation")
+    assert not at.exception
+    assert any("Agent unavailable" in e.value for e in at.error)          # explains and does not run
+    assert not [b for b in at.button if b.label == "Run Investigation"]

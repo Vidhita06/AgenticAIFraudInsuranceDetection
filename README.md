@@ -268,7 +268,7 @@ A Streamlit app for the human-in-the-loop review. It runs on an ordinary laptop:
 model, SHAP, FAISS and the rule-based agent all run on CPU, and no LLM or GPU is needed.
 
 ```bash
-git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
+git clone https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
 cd AgenticAIFraudInsuranceDetection
 python -m venv .venv                   # Python 3.11 or 3.12 recommended; Windows: py -3.12 -m venv .venv
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
@@ -278,32 +278,35 @@ python scripts/build_simulated_db.py   # optional: simulated reference data (~5 
 streamlit run dashboard/app.py         # opens http://localhost:8501
 ```
 
-**What you can do:**
-1. **Claim:** pick a real validation claim (filter by risk band; its known outcome stays hidden
-   in a collapsed panel and is never given to the agent), or fill in a new claim on the form.
-   Any field can be edited before running.
-2. **Agent** (sidebar):
-   - *Rule-based (no LLM)*: the default; instant and deterministic, and runs all six tools.
-   - *LLM from .env*: uses `LLM_PROVIDER` / `MODEL_NAME`. On a laptop, Ollama with
-     `qwen2.5:7b` runs on CPU but is slow (about 1–3 minutes per claim); a free API (Groq,
-     OpenRouter, Gemini; see `.env.example`) is faster. If the LLM isn't reachable, the sidebar
-     says why and you can switch back to rule-based.
-   - The *simulated reference data* toggle feeds Tools 3, 4 and 6 from `data/simulated/insurance.db`.
-3. **Recommendation:**
-   - decision, flag category (FRAUD_RISK / POLICY_CONDITION / SYSTEM_FAILURE), fraud probability
-     and band, reason codes and rationale;
-   - evidence traced to its tool, guardrail notes, conflicts, missing information and
-     unresolved questions.
-4. **Tool results:** a status table for the six tools (who called each one, real or simulated
-   data), a tab per tool (with the SHAP chart, policy checks, similar claims and claim history),
-   and the full trace.
-5. **Your decision:**
-   - approve the recommendation, or override it with APPROVE / FLAG / REQUEST_MORE_INFORMATION / DENY.
-     Only the adjuster can deny.
-   - Overriding requires a reason.
-   - Submitting resumes the paused LangGraph run and writes the decision to the audit store
-     `data/audit/audit.db` (tables `recommendations` and `adjuster_decisions`; the path is
-     `paths.audit_db`). The sidebar lists recent audit entries.
+**Pages** (navigation in the dark sidebar):
+- **Home:** totals (investigations, flag rate, approval rate, overrides), system status
+  (agent mode, data mode, vector index, audit store) and recent adjuster decisions.
+- **New Investigation:** pick a real validation claim (its known outcome stays hidden in a
+  collapsed panel and is never given to the agent), or fill in a new claim on the form. Any
+  field can be edited before **Run Investigation**.
+- **Claim Investigation:**
+  - the recommendation: decision, flag category (FRAUD_RISK / POLICY_CONDITION /
+    SYSTEM_FAILURE), a fraud-probability gauge and band, key reasons, rationale, guardrail notes;
+  - the evidence: SHAP chart, policy checks, similar claims and claim history, a tab per tool
+    and the full trace;
+  - **Your Decision:** approve the recommendation, or override it with APPROVE / FLAG /
+    REQUEST_MORE_INFORMATION / DENY. Only the adjuster can deny. Overriding requires a reason.
+    Submitting resumes the paused LangGraph run and writes the decision to the audit store
+    `data/audit/audit.db` (tables `recommendations` and `adjuster_decisions`; the path is
+    `paths.audit_db`).
+- **Claim History:** the audit store's recommendations and adjuster decisions, with filters.
+- **Reports:** model card metrics and analytics over the recorded investigations.
+- **Settings:** agent mode, simulated data, adjuster ID and component status.
+
+**Sidebar controls:**
+- *Agent Mode*:
+  - *Rule-based (no LLM)* is the default: instant, deterministic, and runs all six tools.
+  - *LLM from .env* uses `LLM_PROVIDER` / `MODEL_NAME`. On a laptop, Ollama with
+    `qwen2.5:7b` runs on CPU but is slow (about 1–3 minutes per claim); a free API (Groq,
+    OpenRouter, Gemini; see `.env.example`) is faster.
+  - If the LLM isn't reachable, the sidebar says why and no investigation runs until you fix
+    it or switch back to rule-based.
+- *Simulated reference data* feeds Tools 3, 4 and 6 from `data/simulated/insurance.db`.
 
 `pytest tests/test_dashboard.py` drives the dashboard headless: it runs a claim, checks that an
 override without a reason is refused, and checks the audit row.
@@ -342,7 +345,7 @@ nohup ollama serve > ollama.log 2>&1 &
 ollama pull qwen2.5:72b
 
 # 2. The repository, in its own virtualenv (keeps the server's torch/numpy untouched)
-git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
+git clone https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
 cd AgenticAIFraudInsuranceDetection
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -382,7 +385,7 @@ The raw `*.jsonl` runs are git-ignored; download them from the file browser if y
    ```bash
    ollama pull qwen2.5:7b                      # ~4.7 GB; needs 8+ GB RAM
 
-   git clone -b claude/brave-hawking-ive43h https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
+   git clone https://github.com/Vidhita06/AgenticAIFraudInsuranceDetection.git
    cd AgenticAIFraudInsuranceDetection
    python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
