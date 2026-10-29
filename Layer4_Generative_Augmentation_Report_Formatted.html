@@ -1,0 +1,1712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer 4: Generative Augmentation Engine - B.Tech Project Report</title>
+<style>
+/* ===== BASE STYLES (XShield Template Match) ===== */
+@page {
+  size: A4;
+  margin: 2.54cm;
+}
+@page :first {
+  @bottom-right { content: none; }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: "Times New Roman", Times, serif;
+  font-size: 12pt;
+  line-height: 1.5;
+  color: #000;
+  text-align: justify;
+  background: #fff;
+}
+
+/* ===== PAGE CONTAINER ===== */
+.page {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 2.54cm;
+  position: relative;
+  page-break-after: always;
+}
+.page:last-child { page-break-after: auto; }
+
+/* ===== PAGE NUMBERS ===== */
+.page-number {
+  position: absolute;
+  bottom: 1.5cm;
+  right: 2.54cm;
+  font-size: 12pt;
+  font-family: "Times New Roman", Times, serif;
+}
+
+/* ===== TITLE PAGE ===== */
+.title-page {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  padding-top: 3cm;
+}
+.title-page .university {
+  font-size: 16pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4pt;
+}
+.title-page .school {
+  font-size: 13pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  margin-bottom: 30pt;
+}
+.title-page .report-type {
+  font-size: 14pt;
+  font-weight: bold;
+  margin-bottom: 6pt;
+}
+.title-page .degree {
+  font-size: 12pt;
+  margin-bottom: 4pt;
+}
+.title-page .lab {
+  font-size: 12pt;
+  margin-bottom: 20pt;
+}
+.title-page .on-label {
+  font-size: 12pt;
+  font-weight: bold;
+  margin-bottom: 20pt;
+}
+.title-page .project-title {
+  font-size: 20pt;
+  font-weight: bold;
+  margin-bottom: 6pt;
+}
+.title-page .project-subtitle {
+  font-size: 12pt;
+  font-style: italic;
+  margin-bottom: 30pt;
+}
+.title-page .submitted-label {
+  font-size: 12pt;
+  font-weight: bold;
+  margin-bottom: 10pt;
+}
+.title-page .student-name {
+  font-size: 11pt;
+  margin-bottom: 3pt;
+}
+.title-page .guide-section {
+  margin-top: 30pt;
+}
+.title-page .guide-label {
+  font-size: 12pt;
+  font-weight: bold;
+}
+.title-page .guide-name {
+  font-size: 12pt;
+  font-weight: bold;
+}
+.title-page .academic-year {
+  font-size: 12pt;
+  font-style: italic;
+  margin-top: 20pt;
+}
+
+/* ===== FRONT MATTER HEADINGS ===== */
+.front-heading {
+  font-size: 16pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 20pt;
+}
+.front-heading-underline {
+  font-size: 16pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: underline;
+  margin-bottom: 20pt;
+}
+.front-subheading {
+  font-size: 14pt;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 6pt;
+}
+.front-institution {
+  font-size: 15pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 4pt;
+}
+
+/* ===== ABSTRACT HEADING (LEFT-ALIGNED per XShield) ===== */
+.abstract-heading {
+  font-size: 16pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: left;
+  margin-bottom: 20pt;
+}
+
+/* ===== BODY TEXT ===== */
+p {
+  text-align: justify;
+  margin-bottom: 10pt;
+}
+.first-indent {
+  text-indent: 1.27cm;
+}
+
+/* ===== TABLES ===== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10pt;
+  margin-bottom: 16pt;
+  font-size: 11pt;
+}
+table, th, td {
+  border: 1px solid #000;
+}
+th {
+  font-weight: bold;
+  text-align: left;
+  padding: 6pt 8pt;
+  background-color: #f5f5f5;
+}
+td {
+  text-align: left;
+  padding: 6pt 8pt;
+  vertical-align: top;
+}
+.table-caption {
+  font-weight: bold;
+  margin-bottom: 6pt;
+  font-size: 11pt;
+}
+
+/* ===== SIGNATURE BLOCKS ===== */
+.sig-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20pt;
+  margin-top: 30pt;
+  margin-bottom: 20pt;
+}
+.sig-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16pt;
+  margin-top: 30pt;
+  margin-bottom: 20pt;
+}
+.sig-block p {
+  text-align: left;
+  margin-bottom: 3pt;
+}
+.sig-center {
+  text-align: center;
+  margin-top: 40pt;
+}
+
+/* ===== DATE/PLACE ROW ===== */
+.date-place {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 30pt;
+  margin-bottom: 30pt;
+}
+
+/* ===== DECLARATION SIGNATURE LINES ===== */
+.decl-sig {
+  margin-top: 20pt;
+}
+.decl-sig p {
+  text-align: left;
+  margin-bottom: 10pt;
+}
+
+/* ===== TABLE OF CONTENTS ===== */
+.toc-heading {
+  font-size: 16pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: left;
+  margin-bottom: 20pt;
+}
+.toc-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4pt;
+  text-align: left;
+}
+.toc-entry .toc-title {
+  flex-shrink: 0;
+  padding-right: 4pt;
+}
+.toc-entry .toc-dots {
+  flex-grow: 1;
+  border-bottom: 1px dotted #666;
+  margin: 0 4pt;
+  min-width: 20pt;
+  position: relative;
+  top: -4pt;
+}
+.toc-entry .toc-page {
+  flex-shrink: 0;
+  padding-left: 4pt;
+  text-align: right;
+  min-width: 24pt;
+}
+.toc-bold .toc-title {
+  font-weight: bold;
+}
+.toc-indent {
+  padding-left: 1.5cm;
+}
+.toc-chapter {
+  margin-top: 8pt;
+}
+
+/* ===== LIST OF FIGURES/TABLES ===== */
+.lof-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6pt;
+}
+.lof-entry .lof-title {
+  font-weight: bold;
+  flex-shrink: 0;
+  padding-right: 4pt;
+}
+.lof-entry .lof-dots {
+  flex-grow: 1;
+  border-bottom: 1px dotted #666;
+  margin: 0 4pt;
+  min-width: 20pt;
+  position: relative;
+  top: -4pt;
+}
+.lof-entry .lof-page {
+  flex-shrink: 0;
+  padding-left: 4pt;
+  text-align: right;
+  min-width: 24pt;
+}
+
+/* ===== CHAPTER DIVIDER PAGE ===== */
+.chapter-divider {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 80%;
+  text-align: right;
+  padding-right: 0;
+}
+.chapter-divider .chapter-label {
+  font-size: 18pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  color: #444;
+  margin-bottom: 12pt;
+}
+.chapter-divider .chapter-title {
+  font-size: 14pt;
+  font-style: italic;
+  color: #444;
+  margin-bottom: 8pt;
+}
+.chapter-divider .chapter-sub {
+  font-size: 11pt;
+  font-style: italic;
+  color: #666;
+  margin-bottom: 4pt;
+}
+
+/* ===== CHAPTER HEADINGS ===== */
+h1.section-heading {
+  font-size: 16pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-align: left;
+  margin-top: 24pt;
+  margin-bottom: 16pt;
+}
+h2.subsection-heading {
+  font-size: 13pt;
+  font-weight: bold;
+  text-align: left;
+  margin-top: 18pt;
+  margin-bottom: 10pt;
+}
+h3.subsubsection-heading {
+  font-size: 12pt;
+  font-weight: bold;
+  text-align: left;
+  margin-top: 14pt;
+  margin-bottom: 8pt;
+}
+
+/* ===== BULLET LISTS ===== */
+ul.report-list {
+  margin-left: 1.5cm;
+  margin-bottom: 12pt;
+  list-style-type: disc;
+}
+ul.report-list li {
+  margin-bottom: 4pt;
+  padding-left: 0.3cm;
+  text-align: justify;
+}
+ol.report-list {
+  margin-left: 1.5cm;
+  margin-bottom: 12pt;
+}
+ol.report-list li {
+  margin-bottom: 4pt;
+  padding-left: 0.3cm;
+  text-align: justify;
+}
+
+/* ===== FIGURE PLACEHOLDER ===== */
+.figure-container {
+  text-align: center;
+  margin: 20pt auto;
+}
+.figure-placeholder {
+  display: inline-block;
+  border: 2px solid #999;
+  background: #f9f9f9;
+  padding: 30pt 40pt;
+  margin-bottom: 10pt;
+  font-size: 10pt;
+  color: #666;
+  font-style: italic;
+  min-width: 60%;
+}
+.figure-caption {
+  font-style: italic;
+  font-weight: bold;
+  font-size: 11pt;
+  text-align: center;
+  margin-top: 6pt;
+}
+
+/* ===== REFERENCES ===== */
+.reference-item {
+  text-align: justify;
+  margin-bottom: 10pt;
+  text-indent: -1cm;
+  padding-left: 1cm;
+}
+
+/* ===== KEYWORDS ===== */
+.keywords {
+  margin-top: 16pt;
+}
+.keywords span.kw-label {
+  font-weight: bold;
+}
+.keywords span.kw-list {
+  font-style: italic;
+}
+
+/* ===== PRINT STYLES ===== */
+@media print {
+  body { margin: 0; padding: 0; }
+  .page {
+    width: auto;
+    min-height: auto;
+    margin: 0;
+    padding: 0;
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+  .no-print { display: none; }
+}
+
+/* ===== SCREEN DISPLAY ===== */
+@media screen {
+  body {
+    background: #e0e0e0;
+    padding: 20px 0;
+  }
+  .page {
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    margin-bottom: 20px;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- TITLE PAGE (no page number) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="title-page">
+    <div class="university">RAMDEOBABA UNIVERSITY</div>
+    <div class="school">SCHOOL OF COMPUTER SCIENCE AND ENGINEERING</div>
+
+    <br><br>
+    <div class="report-type">B. TECH PROJECT REPORT</div>
+    <div class="degree">B.Tech. in Computer Science and Engineering</div>
+    <div class="lab">Idea Lab</div>
+
+    <br>
+    <div class="on-label">ON</div>
+    <br>
+    <div class="project-title">Layer 4: Generative Augmentation Engine</div>
+    <div class="project-subtitle">FLUX.1 Kontext Pipeline for Weather and Domain Augmentation of UAV Scenes</div>
+
+    <br>
+    <div class="submitted-label">Submitted by</div>
+    <div class="student-name">Harshvardhan Talokar &nbsp;|&nbsp; Section A7 &nbsp;|&nbsp; Roll No. 44</div>
+    <div class="student-name">Parth Gupta &nbsp;|&nbsp; Section A5 &nbsp;|&nbsp; Roll No. 21</div>
+    <div class="student-name">Madhulika Deshpande &nbsp;|&nbsp; Section A7 &nbsp;|&nbsp; Roll No. 34</div>
+    <div class="student-name">Mansi Jain &nbsp;|&nbsp; Section A7 &nbsp;|&nbsp; Roll No. 54</div>
+    <div class="student-name">Vaishnavi Singh &nbsp;|&nbsp; Section A1 &nbsp;|&nbsp; Roll No. 01</div>
+    <div class="student-name">Rashi Rahangdale &nbsp;|&nbsp; Section A4 &nbsp;|&nbsp; Roll No. 32</div>
+    <div class="student-name">Aarohi Nagdeote &nbsp;|&nbsp; Section B3 &nbsp;|&nbsp; Roll No. 01</div>
+
+    <div class="guide-section">
+      <div class="guide-label">Under the Guidance of</div>
+      <div class="guide-name">Dr. Sharvari Deshmukh</div>
+      <div class="guide-name">Associate Head: Dr. Preeti Voditel</div>
+    </div>
+
+    <div class="academic-year">Academic Year: 2026&ndash;27</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CERTIFICATE (page ii) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="front-institution">RAMDEOBABA UNIVERSITY, NAGPUR</div>
+  <div class="front-subheading">Department of Computer Science and Engineering</div>
+  <br>
+  <div class="front-heading-underline">CERTIFICATE</div>
+
+  <p class="first-indent">This is to certify that the project report entitled &ldquo;Layer 4: Generative Augmentation Engine: FLUX.1 Kontext Pipeline for Weather and Domain Augmentation of UAV Scenes&rdquo; is a bonafide work carried out by the following students of the B.Tech. programme in Computer Science and Engineering at Ramdeobaba University, Nagpur, during the academic year 2026&ndash;27.</p>
+
+  <table>
+    <tr><th>Student Name</th><th>Section</th><th>Roll No.</th></tr>
+    <tr><td>Harshvardhan Talokar</td><td>A7</td><td>44</td></tr>
+    <tr><td>Parth Gupta</td><td>A5</td><td>21</td></tr>
+    <tr><td>Madhulika Deshpande</td><td>A7</td><td>34</td></tr>
+    <tr><td>Mansi Jain</td><td>A7</td><td>54</td></tr>
+    <tr><td>Vaishnavi Singh</td><td>A1</td><td>01</td></tr>
+    <tr><td>Rashi Rahangdale</td><td>A4</td><td>32</td></tr>
+    <tr><td>Aarohi Nagdeote</td><td>B3</td><td>01</td></tr>
+  </table>
+
+  <p class="first-indent">The work has been carried out under the guidance of Dr. Sharvari Deshmukh, with acknowledgement of the academic support of Associate Head Dr. Preeti Voditel, in partial fulfilment of the requirements of the B.Tech. degree.</p>
+
+  <div class="date-place">
+    <span>Date: _________________</span>
+    <span>Place: Nagpur</span>
+  </div>
+
+  <div class="sig-grid">
+    <div class="sig-block">
+      <p><strong>Project Guide</strong></p>
+      <p>Dr. Sharvari Deshmukh</p>
+      <p>Signature: _____________</p>
+    </div>
+    <div class="sig-block">
+      <p><strong>Associate Head</strong></p>
+      <p>Dr. Preeti Voditel</p>
+      <p>Signature: _____________</p>
+    </div>
+  </div>
+
+  <div class="sig-center">
+    <p>Dean, School of Computer Science and Engineering</p>
+    <p>Signature: _____________________</p>
+  </div>
+
+  <div class="page-number">ii</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- STUDENT DECLARATION (page iii) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="front-heading">STUDENT DECLARATION</div>
+
+  <p class="first-indent">We hereby declare that the project report entitled &ldquo;Layer 4: Generative Augmentation Engine&rdquo; is submitted as part of the requirements for the B.Tech. programme at Ramdeobaba University.</p>
+
+  <p>The report describes the Layer 4 generative augmentation workflow for UAV-scene images, using an existing 3D Gaussian Splatting (3DGS) reconstruction, camera-rendered RGB views, FLUX.1 Kontext image editing, per-image metadata, and preliminary quality evaluation. Statements about implementation status and evaluation are limited to the evidence described in the supplied project presentation and supporting materials.</p>
+
+  <p>We understand that pilot image metrics do not independently prove realism, three-dimensional geometry preservation, or improvement in downstream UAV detection. In particular, the reported FID result is explicitly treated as an invalid pilot for a realism claim, geometry evaluation is not validated without genuine matched annotations, and provisional outputs or draft thresholds are identified as such.</p>
+
+  <div class="decl-sig">
+    <p>Harshvardhan Talokar &mdash; Section A7, Roll No. 44: _______________________________</p>
+    <p>Parth Gupta &mdash; Section A5, Roll No. 21: _______________________________</p>
+    <p>Madhulika Deshpande &mdash; Section A7, Roll No. 34: _______________________________</p>
+    <p>Mansi Jain &mdash; Section A7, Roll No. 54: _______________________________</p>
+    <p>Vaishnavi Singh &mdash; Section A1, Roll No. 01: _______________________________</p>
+    <p>Rashi Rahangdale &mdash; Section A4, Roll No. 32: _______________________________</p>
+    <p>Aarohi Nagdeote &mdash; Section B3, Roll No. 01: _______________________________</p>
+  </div>
+
+  <div class="page-number">iii</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- APPROVAL SHEET (page iv) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="front-heading-underline">APPROVAL SHEET</div>
+
+  <p class="first-indent">This report entitled &ldquo;Layer 4: Generative Augmentation Engine&rdquo; by the listed seven students is submitted for consideration toward the degree of Bachelor of Technology (B.Tech.) in Computer Science and Engineering.</p>
+
+  <div class="sig-grid-3">
+    <div class="sig-block">
+      <p><strong>Project Guide</strong></p>
+      <p>Dr. Sharvari Deshmukh</p>
+      <p>Signature: _____________</p>
+    </div>
+    <div class="sig-block">
+      <p><strong>Associate Head</strong></p>
+      <p>Dr. Preeti Voditel</p>
+      <p>Signature: _____________</p>
+    </div>
+    <div class="sig-block">
+      <p><strong>External Examiner</strong></p>
+      <p>Name: _________________</p>
+      <p>Signature: _____________</p>
+    </div>
+  </div>
+
+  <div class="sig-center">
+    <p>Dean, School of Computer Science and Engineering</p>
+    <p>Signature: _____________________</p>
+  </div>
+
+  <div class="page-number">iv</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ACKNOWLEDGEMENT (page v) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="front-heading">ACKNOWLEDGEMENT</div>
+
+  <p class="first-indent">We express our sincere gratitude to Ramdeobaba University and the School of Computer Science and Engineering for providing the academic environment and facilities required to undertake this project.</p>
+
+  <p>We are grateful to Dr. Sharvari Deshmukh for guidance, suggestions and feedback, and to Associate Head Dr. Preeti Voditel for academic support. We also acknowledge the contributions of the Layer 4 team members who worked on scene rendering, FLUX.1 Kontext generation, metadata tracking and quality evaluation.</p>
+
+  <p>We acknowledge the authors and maintainers of the 3D Gaussian Splatting ecosystem, FLUX.1 Kontext and the associated software libraries used in the workflow. We also acknowledge the supplied Layer 4 project presentation and handoff materials as the source of the implementation details and provisional evaluation results documented here.</p>
+
+  <div class="page-number">v</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ABSTRACT (page vi) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="abstract-heading">ABSTRACT</div>
+
+  <p class="first-indent">Unmanned Aerial Vehicle (UAV) vision systems must operate under changing weather, lighting and viewpoint conditions, yet collecting real aerial imagery for every condition can be costly and limited. This project studies Layer 4 of a drone data augmentation pipeline: a generative augmentation engine that takes RGB views rendered from an existing 3D Gaussian Splatting (3DGS) reconstruction and edits their appearance with FLUX.1 Kontext. The current pilot uses the reconstructed 2_city scene, six camera views, and five target conditions&mdash;sunset, evening, night, heavy rain and snow.</p>
+
+  <p>The documented workflow renders six 1600 &times; 1200 RGB views and generates condition variants using FLUX.1 Kontext, with a fixed seed of 42 and JSON sidecar metadata recording prompts and generation settings. The supplied presentation reports 30 generated images, an output resolution of 1168 &times; 880, and approximately 38&ndash;40 seconds per image on a DGX GPU environment. Preliminary checks include condition-label matching, sharpness review, edge alignment, LPIPS, a pilot FID calculation and a baseline multi-view consistency measurement.</p>
+
+  <p>The results are interpreted conservatively. The FID value of 301.6 is labelled a pilot and not valid for a realism claim because only six images per condition were used and the reference set was the same scene&rsquo;s six renders. Edge alignment is a two-dimensional proxy, not proof of 3D geometry preservation. The current status also identifies 23 images checked and seven excluded for now, with night outputs and one evening output provisional and being regenerated. Genuine object annotations and downstream real-UAV evaluation remain open. The report therefore presents a working controlled augmentation pilot, not a validated claim of geometry preservation or improved detection.</p>
+
+  <div class="keywords">
+    <span class="kw-label">Keywords: </span><span class="kw-list">UAV vision, data augmentation, 3D Gaussian Splatting, FLUX.1 Kontext, image editing, LPIPS, FID, quality control</span>
+  </div>
+
+  <div class="page-number">vi</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TABLE OF CONTENTS (page vii) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="toc-heading">TABLE OF CONTENTS</div>
+
+  <!-- Front matter entries (bold) -->
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">Student Declaration</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">iii</span>
+  </div>
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">Approval Sheet</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">iv</span>
+  </div>
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">Acknowledgement</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">v</span>
+  </div>
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">Abstract</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">vi</span>
+  </div>
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">List of Figures</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">vii</span>
+  </div>
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">List of Tables</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">viii</span>
+  </div>
+  <div class="toc-entry toc-bold">
+    <span class="toc-title">List of Abbreviations</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">ix</span>
+  </div>
+
+  <br>
+  <!-- Chapter 1 -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Chapter 1: Introduction</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">1</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">1.1 Background</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">1</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">1.2 Problem Statement</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">2</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">1.3 Objectives</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">2</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">1.4 Scope</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">2</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">1.5 Organization of the Report</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">3</span>
+  </div>
+
+  <!-- Chapter 2 -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Chapter 2: Literature Review and Research Gap</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">4</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">2.1 Introduction</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">4</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">2.2 Existing Approaches</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">4</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">2.3 Comparison of Approaches</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">5</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">2.4 Limitations</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">6</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">2.5 Research Gap</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">6</span>
+  </div>
+
+  <!-- Chapter 3 -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Chapter 3: Proposed System and Methodology</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">7</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">3.1 Proposed System</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">7</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">3.2 Scene and Data Inputs</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">8</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">3.3 Generation Method</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">8</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">3.4 Evaluation Metrics</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">9</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">3.5 Quality Gate</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">10</span>
+  </div>
+
+  <!-- Chapter 4 -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Chapter 4: System Design and Implementation</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">11</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">4.1 System Architecture</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">11</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">4.2 Hardware and Software</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">12</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">4.3 Camera Configuration</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">12</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">4.4 Generation Metadata</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">13</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">4.5 Implementation Workflow</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">14</span>
+  </div>
+
+  <!-- Chapter 5 -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Chapter 5: Results and Discussion</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">15</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">5.1 Experimental Setup</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">15</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">5.2 Generation Results</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">16</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">5.3 Quality Evaluation</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">16</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">5.4 Limitations and Status</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">18</span>
+  </div>
+  <div class="toc-entry toc-indent">
+    <span class="toc-title">5.5 Acceptance-Test Summary</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">19</span>
+  </div>
+
+  <!-- Chapter 6 -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Chapter 6: Conclusion and Future Scope</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">20</span>
+  </div>
+
+  <!-- Back matter -->
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">References</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">22</span>
+  </div>
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Annexure A: Student Contribution Statement</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">24</span>
+  </div>
+  <div class="toc-entry toc-bold toc-chapter">
+    <span class="toc-title">Annexure B: Project Outputs and Metadata</span>
+    <span class="toc-dots"></span>
+    <span class="toc-page">25</span>
+  </div>
+
+  <div class="page-number">vii</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- LIST OF FIGURES (page viii) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="toc-heading">LIST OF FIGURES</div>
+
+  <div class="lof-entry">
+    <span class="lof-title">Figure 3.1: Layer 4 implementation pipeline</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">7</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Figure 3.2: Per-image generation and traceability</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">8</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Figure 3.3: Evaluation signals and interpretation</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">10</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Figure 4.1: Software component architecture</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">11</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Figure 5.1: Reported edge-alignment ranges by condition</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">16</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Figure 5.2: Reported LPIPS values by condition</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">17</span>
+  </div>
+
+  <div class="page-number">viii</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- LIST OF TABLES (page ix) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="toc-heading">LIST OF TABLES</div>
+
+  <div class="lof-entry">
+    <span class="lof-title">Table 2.1: Comparison of representative methods and project relevance</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">5</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 3.1: Dataset and experimental inputs</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">8</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 3.2: Evaluation metrics and valid interpretations</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">9</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 4.1: Implementation components and responsibilities</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">12</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 4.2: Camera configuration</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">12</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 4.3: Generation settings</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">13</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 5.1: Reported structural edge-alignment ranges</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">16</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 5.2: Reported LPIPS values</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">17</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 5.3: Pilot FID results</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">17</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table 5.4: Current status and acceptance summary</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">19</span>
+  </div>
+  <div class="lof-entry">
+    <span class="lof-title">Table A.1: Student contribution statement</span>
+    <span class="lof-dots"></span>
+    <span class="lof-page">24</span>
+  </div>
+
+  <div class="page-number">ix</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- LIST OF ABBREVIATIONS (page x) -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="toc-heading">LIST OF ABBREVIATIONS</div>
+
+  <p class="table-caption">Table: List of Abbreviations</p>
+  <table>
+    <tr><th>Abbreviation</th><th>Meaning</th></tr>
+    <tr><td>3DGS</td><td>3D Gaussian Splatting</td></tr>
+    <tr><td>AI</td><td>Artificial Intelligence</td></tr>
+    <tr><td>FID</td><td>Fr&eacute;chet Inception Distance</td></tr>
+    <tr><td>FLUX</td><td>FLUX.1 Kontext generative image-editing model</td></tr>
+    <tr><td>FOV</td><td>Field of View</td></tr>
+    <tr><td>GPU</td><td>Graphics Processing Unit</td></tr>
+    <tr><td>LPIPS</td><td>Learned Perceptual Image Patch Similarity</td></tr>
+    <tr><td>MEt3R</td><td>Multi-view consistency metric referenced in the project presentation</td></tr>
+    <tr><td>PNG</td><td>Portable Network Graphics</td></tr>
+    <tr><td>QC</td><td>Quality Control</td></tr>
+    <tr><td>RGB</td><td>Red, Green, Blue</td></tr>
+    <tr><td>UAV</td><td>Unmanned Aerial Vehicle</td></tr>
+    <tr><td>JSON</td><td>JavaScript Object Notation</td></tr>
+  </table>
+
+  <div class="page-number">x</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 1 DIVIDER -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="chapter-divider">
+    <div class="chapter-label">CHAPTER 1</div>
+    <div class="chapter-title">Introduction</div>
+    <div class="chapter-sub">1.1 Background</div>
+    <div class="chapter-sub">1.2 Problem Statement</div>
+    <div class="chapter-sub">1.3 Objectives</div>
+    <div class="chapter-sub">1.4 Scope</div>
+    <div class="chapter-sub">1.5 Organization of the Report</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 1 CONTENT -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading">1. INTRODUCTION</h1>
+
+  <p class="first-indent">This chapter introduces the motivation for generative augmentation of UAV imagery, defines the problem addressed by Layer 4, and states the objectives and scope of the reported pilot. Layer 4 operates on 2D images rendered from an existing 3D scene; it does not reconstruct the scene or independently establish object ground truth.</p>
+
+  <h2 class="subsection-heading">1.1 Background</h2>
+
+  <p class="first-indent">UAV imagery is used in surveillance, mapping, traffic monitoring, disaster response and environmental observation. A model trained on a narrow set of weather and lighting conditions may perform less reliably when the deployment environment changes. Collecting and labelling enough real images across every combination of conditions is expensive and operationally difficult.</p>
+
+  <p>A 3D Gaussian Splatting reconstruction represents a scene with Gaussian primitives and can render RGB images from specified camera viewpoints. These renders provide a repeatable visual starting point. FLUX.1 Kontext can then edit a supplied image according to a text instruction, for example introducing rain, snow or lower illumination while attempting to retain the original scene layout.</p>
+
+  <h2 class="subsection-heading">1.2 Problem Statement</h2>
+
+  <p class="first-indent">The project addresses the limited diversity of environmental appearance in UAV training imagery. The technical challenge is to generate plausible condition-specific variants of rendered views while minimising unwanted changes to buildings, roads and scene layout. Since a generative model edits pixels rather than enforcing exact 3D constraints, each output must be evaluated and its limitations documented.</p>
+
+  <h2 class="subsection-heading">1.3 Objectives</h2>
+
+  <ul class="report-list">
+    <li>Use the existing 2_city 3DGS reconstruction as the fixed scene source.</li>
+    <li>Render a controlled set of RGB views with documented camera parameters.</li>
+    <li>Apply FLUX.1 Kontext prompts to generate five environmental or lighting variants per view.</li>
+    <li>Record per-image generation parameters and metadata for traceability.</li>
+    <li>Review condition correctness, image quality and two-dimensional structural alignment.</li>
+    <li>Interpret LPIPS, FID and multi-view consistency without conflating their meanings.</li>
+    <li>Define a transparent review gate and identify which outputs remain provisional.</li>
+    <li>Prepare the pipeline for future evaluation against real UAV datasets and genuine annotations.</li>
+  </ul>
+
+  <h2 class="subsection-heading">1.4 Scope</h2>
+
+  <p class="first-indent">The report covers the Layer 4 pilot described in the supplied project presentation: 2_city rendering, six views, five conditions, FLUX.1 Kontext generation, JSON metadata and preliminary quality checks. The report does not claim that all outputs are accepted, that 3D geometry is preserved, or that augmented data improves a downstream detector.</p>
+
+  <p>Layer 2 is not treated as a mandatory dependency for running the Layer 4 image-generation pipeline. However, geometry/object-preservation evaluation requires genuine annotations correctly matched to the views. If those are unavailable, geometry evaluation remains not validated. The FID pilot is not treated as a valid realism benchmark.</p>
+
+  <h2 class="subsection-heading">1.5 Organization of the Report</h2>
+
+  <p class="first-indent">Chapter 1 introduces the problem and scope. Chapter 2 reviews relevant methodological approaches and the research gap. Chapter 3 explains the proposed pipeline and evaluation methodology. Chapter 4 documents the system architecture and implementation settings. Chapter 5 presents the reported results and limitations. Chapter 6 concludes the report and outlines future work.</p>
+
+  <div class="page-number">1</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 2 DIVIDER -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="chapter-divider">
+    <div class="chapter-label">CHAPTER 2</div>
+    <div class="chapter-title">Literature Review and Research Gap</div>
+    <div class="chapter-sub">2.1 Introduction</div>
+    <div class="chapter-sub">2.2 Existing Approaches</div>
+    <div class="chapter-sub">2.3 Comparison of Representative Approaches</div>
+    <div class="chapter-sub">2.4 Limitations of Existing Work</div>
+    <div class="chapter-sub">2.5 Research Gap</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 2 CONTENT -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading">2. LITERATURE REVIEW AND RESEARCH GAP</h1>
+
+  <h2 class="subsection-heading">2.1 Introduction</h2>
+
+  <p class="first-indent">Layer 4 combines three established ideas: scene-based synthetic view generation, image-conditioned generative editing, and quality assessment of generated images. The project materials identify these as complementary parts of a pipeline rather than claiming that one method solves every issue. The review below is framed around the technical roles and limitations relevant to the implementation; exact bibliographic details should be checked against the team&rsquo;s final reference list before submission.</p>
+
+  <h2 class="subsection-heading">2.2 Existing Approaches</h2>
+
+  <p class="first-indent">Scene reconstruction and novel-view rendering provide a repeatable source of images from a common scene representation. 3D Gaussian Splatting is the source representation used in this project. It allows the team to render several camera views without acquiring a new real flight for each viewpoint.</p>
+
+  <p>Image-conditioned generative editing accepts both an input image and a text prompt. In this project, FLUX.1 Kontext is used to alter environmental appearance. This is distinct from a simple procedural overlay: the model synthesises image content according to learned patterns, which can improve visual plausibility but can also introduce unintended changes.</p>
+
+  <p>Image-quality evaluation is multi-dimensional. LPIPS measures perceptual feature difference between an original and an edited image; edge alignment compares visible outlines; FID compares distributions of deep image features across image sets; and multi-view metrics assess consistency between neighbouring views. These measures answer different questions and must not be treated as interchangeable.</p>
+
+  <h2 class="subsection-heading">2.3 Comparison of Representative Approaches</h2>
+
+  <p class="table-caption">Table 2.1: Comparison of representative methods and project relevance</p>
+  <table>
+    <tr>
+      <th>Approach</th>
+      <th>Primary role</th>
+      <th>Strength</th>
+      <th>Limitation for this project</th>
+    </tr>
+    <tr>
+      <td>3D Gaussian Splatting</td>
+      <td>Render scene views</td>
+      <td>Fixed scene can produce repeatable viewpoints</td>
+      <td>Rendering quality depends on reconstruction and camera setup; it does not provide object labels by itself</td>
+    </tr>
+    <tr>
+      <td>Procedural weather overlays</td>
+      <td>Apply hand-coded visual effects</td>
+      <td>Fast and deterministic</td>
+      <td>May look artificial and does not learn scene-aware appearance changes</td>
+    </tr>
+    <tr>
+      <td>Image-conditioned generative editing (FLUX.1 Kontext)</td>
+      <td>Edit a render using a prompt</td>
+      <td>Can produce condition-specific appearance changes</td>
+      <td>May alter structure, omit details or introduce artifacts; output must be reviewed</td>
+    </tr>
+    <tr>
+      <td>LPIPS</td>
+      <td>Compare perceptual difference</td>
+      <td>Useful for quantifying how much an edit changes appearance</td>
+      <td>A high score may be expected for a strong condition change; it is not realism or task performance</td>
+    </tr>
+    <tr>
+      <td>FID</td>
+      <td>Compare feature distributions of image sets</td>
+      <td>Can compare generated and real image distributions when designed appropriately</td>
+      <td>Unstable or misleading with very small, non-independent or inappropriate reference sets</td>
+    </tr>
+    <tr>
+      <td>Edge alignment</td>
+      <td>Compare 2D contours</td>
+      <td>Simple structural proxy</td>
+      <td>Sensitive to darkness, haze, shifts and missing edges; not proof of 3D geometry preservation</td>
+    </tr>
+  </table>
+
+  <div class="page-number">2</div>
+</div>
+
+<div class="page">
+  <h2 class="subsection-heading">2.4 Limitations of Existing Work</h2>
+
+  <ul class="report-list">
+    <li>Generative editing can change scene details even when prompts request preservation.</li>
+    <li>Small pilot image sets do not support strong distribution-level realism claims.</li>
+    <li>Two-dimensional edge similarity is affected by lighting and image shifts.</li>
+    <li>Without matched ground-truth boxes or masks, object-preservation metrics such as IoU cannot be validly computed.</li>
+    <li>Visual plausibility does not guarantee that augmented images improve real-world detection or tracking.</li>
+  </ul>
+
+  <h2 class="subsection-heading">2.5 Research Gap</h2>
+
+  <p class="first-indent">The practical gap addressed by this pilot is an auditable pipeline that joins a fixed 3DGS scene, controlled camera renders, prompt-conditioned weather/lighting edits, per-image metadata and a transparent quality-review process. The contribution is an engineering workflow and a preliminary evaluation protocol. The current evidence is not sufficient to establish geometry preservation, broad realism, or downstream performance improvement; these remain validation tasks.</p>
+
+  <div class="page-number">3</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 3 DIVIDER -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="chapter-divider">
+    <div class="chapter-label">CHAPTER 3</div>
+    <div class="chapter-title">Proposed System and Methodology</div>
+    <div class="chapter-sub">3.1 Proposed System</div>
+    <div class="chapter-sub">3.2 Scene and Data Inputs</div>
+    <div class="chapter-sub">3.3 Generation Method</div>
+    <div class="chapter-sub">3.4 Evaluation Metrics</div>
+    <div class="chapter-sub">3.5 Quality Gate</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 3 CONTENT -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading">3. PROPOSED SYSTEM AND METHODOLOGY</h1>
+
+  <h2 class="subsection-heading">3.1 Proposed System</h2>
+
+  <p class="first-indent">The proposed Layer 4 system begins with the existing reconstructed 2_city scene. Six camera poses are used to render original RGB views. Each view is supplied to FLUX.1 Kontext with one of five target-condition prompts. The generated images are paired with JSON sidecars and passed to quality checks. Outputs are then classified for review or exclusion rather than automatically treated as validated training data.</p>
+
+  <div class="figure-container">
+    <div class="figure-placeholder">
+      [Figure: Layer 4 implementation pipeline]<br>
+      3DGS scene &rarr; Camera render &rarr; FLUX.1 Kontext &rarr; Quality checks &rarr; Review gate &rarr; Export
+    </div>
+    <div class="figure-caption"><em>Figure 3.1: Layer 4 implementation pipeline.</em></div>
+  </div>
+
+  <h2 class="subsection-heading">3.2 Scene and Data Inputs</h2>
+
+  <p class="table-caption">Table 3.1: Dataset and experimental inputs</p>
+  <table>
+    <tr><th>Item</th><th>Reported configuration</th></tr>
+    <tr><td>Scene</td><td>2_city 3DGS reconstruction</td></tr>
+    <tr><td>Scene representation</td><td>48.8 million Gaussian primitives, as stated in the detailed presentation</td></tr>
+    <tr><td>Original views</td><td>Six RGB renders</td></tr>
+    <tr><td>Image resolution</td><td>1600 &times; 1200 pixels</td></tr>
+    <tr><td>Azimuths</td><td>0&deg;, 8&deg;, 16&deg;, 24&deg;, 32&deg;, 40&deg;</td></tr>
+    <tr><td>Elevation</td><td>45&deg; for all six views</td></tr>
+    <tr><td>Camera field of view</td><td>60&deg;</td></tr>
+    <tr><td>Camera distance</td><td>0.2 (project presentation setting; coordinate convention not specified)</td></tr>
+    <tr><td>Target conditions</td><td>Sunset, Evening, Night, Heavy Rain, Snow</td></tr>
+    <tr><td>Expected generated images</td><td>6 views &times; 5 conditions = 30 outputs</td></tr>
+  </table>
+
+  <h2 class="subsection-heading">3.3 Generation Method</h2>
+
+  <p class="first-indent">FLUX.1 Kontext is used as an image-conditioned generative editor. The input is an original rendered RGB view and the condition prompt. Prompts target weather or lighting changes and include an instruction to keep buildings, roads and the overall layout unchanged. That instruction expresses the intended constraint; it does not mathematically guarantee that structure is preserved.</p>
+
+  <div class="figure-container">
+    <div class="figure-placeholder">
+      [Figure: Per-image generation and traceability]<br>
+      Original render &rarr; Condition prompt &rarr; FLUX.1 Kontext &rarr; Generated image &rarr; Metadata sidecar
+    </div>
+    <div class="figure-caption"><em>Figure 3.2: Per-image generation and traceability.</em></div>
+  </div>
+
+  <p>The detailed presentation reports model ID black-forest-labs/FLUX.1-Kontext-dev, seed 42 for all images, guidance scale 2.5 for the baseline condition, 5.0 for heavy rain and 4.5 for snow. Reported output size is 1168 &times; 880, with approximately 38&ndash;40 seconds per image and around 34 GB GPU memory in the DGX environment. These are project-reported settings and should be confirmed against saved run logs before formal publication.</p>
+
+  <div class="page-number">4</div>
+</div>
+
+<div class="page">
+  <h2 class="subsection-heading">3.4 Evaluation Metrics</h2>
+
+  <p class="table-caption">Table 3.2: Evaluation metrics and valid interpretations</p>
+  <table>
+    <tr>
+      <th>Metric / check</th>
+      <th>What it measures</th>
+      <th>Valid interpretation</th>
+      <th>What it does not prove</th>
+    </tr>
+    <tr>
+      <td>Condition correctness</td>
+      <td>Whether the image visibly matches its target condition</td>
+      <td>A condition label and visual review can identify mismatches</td>
+      <td>Not structural preservation or realism by itself</td>
+    </tr>
+    <tr>
+      <td>Sharpness / artifacts</td>
+      <td>Visual clarity, blur, artifacts and coherence</td>
+      <td>Human quality review and supporting image measures</td>
+      <td>Not downstream model utility</td>
+    </tr>
+    <tr>
+      <td>Edge alignment</td>
+      <td>Similarity of visible 2D outlines</td>
+      <td>A rough proxy for whether prominent outlines remain in similar locations</td>
+      <td>Not direct 3D geometry preservation</td>
+    </tr>
+    <tr>
+      <td>LPIPS</td>
+      <td>Perceptual feature difference from the original render</td>
+      <td>Relative amount of perceptual change between paired images</td>
+      <td>Not realism; large changes may be intentional</td>
+    </tr>
+    <tr>
+      <td>FID</td>
+      <td>Feature-distribution distance between image groups</td>
+      <td>Useful only with an appropriate, sufficiently large reference setup</td>
+      <td>The supplied pilot does not validate realism</td>
+    </tr>
+    <tr>
+      <td>MEt3R / multi-view baseline</td>
+      <td>Consistency signal across neighbouring original views</td>
+      <td>Baseline for later comparison with augmented views</td>
+      <td>Does not prove the reconstructed geometry is correct</td>
+    </tr>
+    <tr>
+      <td>BBox IoU / mask consistency</td>
+      <td>Object or semantic alignment against annotations</td>
+      <td>Valid only with genuine, correctly matched ground truth</td>
+      <td>Cannot be inferred from edge scores or FID</td>
+    </tr>
+  </table>
+
+  <h2 class="subsection-heading">3.5 Quality Gate</h2>
+
+  <p class="first-indent">The quality gate is currently a draft review aid. The supplied presentation states that all 30 generated images matched their assigned condition labels, but only 23 were checked and seven were excluded for now. Night outputs and the view_00 evening output were provisional and being regenerated. Gate thresholds are placeholders and require empirical calibration. Therefore, an output should be accepted for downstream use only after the current image, its metadata, condition correctness and quality checks have been reviewed.</p>
+
+  <div class="figure-container">
+    <div class="figure-placeholder">
+      [Figure: Evaluation signals and interpretation]<br>
+      Visual review | LPIPS | Edge alignment | FID pilot | Decision
+    </div>
+    <div class="figure-caption"><em>Figure 3.3: Evaluation signals and their interpretation.</em></div>
+  </div>
+
+  <div class="page-number">5</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 4 DIVIDER -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="chapter-divider">
+    <div class="chapter-label">CHAPTER 4</div>
+    <div class="chapter-title">System Design and Implementation</div>
+    <div class="chapter-sub">4.1 System Architecture</div>
+    <div class="chapter-sub">4.2 Hardware and Software Components</div>
+    <div class="chapter-sub">4.3 Camera Configuration</div>
+    <div class="chapter-sub">4.4 Generation Settings and Metadata</div>
+    <div class="chapter-sub">4.5 Implementation Workflow</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 4 CONTENT -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading">4. SYSTEM DESIGN AND IMPLEMENTATION</h1>
+
+  <h2 class="subsection-heading">4.1 System Architecture</h2>
+
+  <p class="first-indent">The architecture is organised into scene assets, renderer, generative editor, metadata sidecars, evaluation scripts/notebooks and dataset export. Layer 2 outputs are not a required runtime dependency for generating RGB variants. They are, however, needed if the team intends to claim annotation-based object-preservation scores.</p>
+
+  <div class="figure-container">
+    <div class="figure-placeholder">
+      [Figure: Software component architecture]<br>
+      Scene assets &rarr; Renderer &rarr; Generator adapter &rarr; Metadata store &rarr; Evaluation &rarr; Dataset export
+    </div>
+    <div class="figure-caption"><em>Figure 4.1: Software component architecture.</em></div>
+  </div>
+
+  <h2 class="subsection-heading">4.2 Hardware and Software Components</h2>
+
+  <p class="table-caption">Table 4.1: Implementation components and responsibilities</p>
+  <table>
+    <tr><th>Component</th><th>Role / status</th></tr>
+    <tr><td>3D Gaussian Splatting renderer</td><td>Renders the reconstructed 2_city scene from specified camera parameters</td></tr>
+    <tr><td>FLUX.1 Kontext</td><td>Image-conditioned editing for five weather/lighting conditions</td></tr>
+    <tr><td>Python / model runtime</td><td>Runs generation and evaluation scripts; exact package versions should be captured from the environment</td></tr>
+    <tr><td>DGX GPU environment</td><td>Reported generation environment; around 34 GB GPU memory in the presentation</td></tr>
+    <tr><td>PNG images</td><td>Stores original renders and generated RGB outputs</td></tr>
+    <tr><td>JSON sidecars</td><td>Record model, prompt, seed, condition, settings and file/view metadata</td></tr>
+    <tr><td>QC notebooks/scripts</td><td>Condition checks, sharpness, edge alignment, LPIPS, pilot FID and baseline multi-view measurements</td></tr>
+  </table>
+
+  <h2 class="subsection-heading">4.3 Camera Configuration</h2>
+
+  <p class="table-caption">Table 4.2: Camera configuration</p>
+  <table>
+    <tr><th>View ID</th><th>Azimuth</th><th>Elevation</th><th>FOV</th><th>Resolution</th></tr>
+    <tr><td>view_00</td><td>0&deg;</td><td>45&deg;</td><td>60&deg;</td><td>1600 &times; 1200</td></tr>
+    <tr><td>view_01</td><td>8&deg;</td><td>45&deg;</td><td>60&deg;</td><td>1600 &times; 1200</td></tr>
+    <tr><td>view_02</td><td>16&deg;</td><td>45&deg;</td><td>60&deg;</td><td>1600 &times; 1200</td></tr>
+    <tr><td>view_03</td><td>24&deg;</td><td>45&deg;</td><td>60&deg;</td><td>1600 &times; 1200</td></tr>
+    <tr><td>view_04</td><td>32&deg;</td><td>45&deg;</td><td>60&deg;</td><td>1600 &times; 1200</td></tr>
+    <tr><td>view_05</td><td>40&deg;</td><td>45&deg;</td><td>60&deg;</td><td>1600 &times; 1200</td></tr>
+  </table>
+
+  <p>Neighbouring views differ by 8&deg; in azimuth. The fixed elevation and field of view make the pilot controlled, but the six views cover only a small portion of the possible camera space.</p>
+
+  <div class="page-number">6</div>
+</div>
+
+<div class="page">
+  <h2 class="subsection-heading">4.4 Generation Settings and Metadata</h2>
+
+  <p class="table-caption">Table 4.3: Generation settings</p>
+  <table>
+    <tr><th>Field</th><th>Reported value / purpose</th></tr>
+    <tr><td>Model ID</td><td>black-forest-labs/FLUX.1-Kontext-dev</td></tr>
+    <tr><td>Seed</td><td>42 for all images</td></tr>
+    <tr><td>Guidance scale</td><td>2.5 baseline; 5.0 heavy rain; 4.5 snow</td></tr>
+    <tr><td>Input dimensions</td><td>1600 &times; 1200</td></tr>
+    <tr><td>Output dimensions</td><td>1168 &times; 880</td></tr>
+    <tr><td>Runtime</td><td>Approximately 38&ndash;40 seconds per image</td></tr>
+    <tr><td>GPU memory</td><td>Approximately 34 GB in the reported DGX run</td></tr>
+    <tr><td>Metadata</td><td>One JSON sidecar per generated image, including condition, prompt, model ID, seed and generation settings</td></tr>
+  </table>
+
+  <p>A fixed seed helps reproducibility but does not guarantee bit-for-bit identical outputs across software versions, hardware, precision modes or model revisions. The metadata should preserve the exact prompt, model revision, package versions, source-image path, output path, generation time and GPU details where available.</p>
+
+  <h2 class="subsection-heading">4.5 Implementation Workflow</h2>
+
+  <ol class="report-list">
+    <li>Load the existing 2_city 3DGS scene and confirm the renderer and camera configuration.</li>
+    <li>Render six original RGB views and preserve the camera metadata.</li>
+    <li>Create the five condition prompts with a shared scene-preservation instruction.</li>
+    <li>Run FLUX.1 Kontext for each view-condition pair and save the generated image.</li>
+    <li>Write a JSON sidecar for each output and validate required fields and image dimensions.</li>
+    <li>Run condition, sharpness, edge-alignment and LPIPS checks; treat FID as a non-valid pilot only.</li>
+    <li>Review provisional outputs manually, exclude uncertain images and document regeneration status.</li>
+    <li>Export only reviewed outputs with traceable metadata for future downstream evaluation.</li>
+  </ol>
+
+  <div class="page-number">7</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 5 DIVIDER -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="chapter-divider">
+    <div class="chapter-label">CHAPTER 5</div>
+    <div class="chapter-title">Results and Discussion</div>
+    <div class="chapter-sub">5.1 Experimental Setup</div>
+    <div class="chapter-sub">5.2 Generation Results</div>
+    <div class="chapter-sub">5.3 Quality Evaluation</div>
+    <div class="chapter-sub">5.4 Limitations and Current Status</div>
+    <div class="chapter-sub">5.5 Acceptance-Test Summary</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 5 CONTENT -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading">5. RESULTS AND DISCUSSION</h1>
+
+  <h2 class="subsection-heading">5.1 Experimental Setup</h2>
+
+  <p class="first-indent">The reported pilot uses the 2_city reconstructed scene, six rendered views and five target conditions, yielding 30 intended image variants. The original renders are 1600 &times; 1200 and the FLUX outputs are reported at 1168 &times; 880. The same seed (42) was used across the image batch. The presentation identifies some quality-check outputs as draft/provisional and explicitly cautions against treating the pilot FID as valid.</p>
+
+  <h2 class="subsection-heading">5.2 Generation Results</h2>
+
+  <p class="first-indent">The team reports generation of 30 images across Sunset, Evening, Night, Heavy Rain and Snow. The per-image metadata records the condition, model ID, seed, prompt and settings. The detailed presentation reports approximately 38&ndash;40 seconds per image on the DGX environment.</p>
+
+  <p class="table-caption">Table: Generation results by condition</p>
+  <table>
+    <tr><th>Condition</th><th>Reported generation / review note</th></tr>
+    <tr><td>Sunset</td><td>Strong appearance change; presentation notes horizon/sky/sun changes and framing change for view_00, requiring visual review</td></tr>
+    <tr><td>Evening</td><td>Very dark in the example; view_00 evening is listed as provisional and being regenerated</td></tr>
+    <tr><td>Night</td><td>Very dark in the example; night outputs are listed as provisional and being regenerated</td></tr>
+    <tr><td>Heavy Rain</td><td>Described as subtle in the example; strongest reported edge alignment among the listed conditions</td></tr>
+    <tr><td>Snow</td><td>Snow appearance added; LPIPS indicates a moderate-to-large perceptual change from the original</td></tr>
+  </table>
+
+  <h2 class="subsection-heading">5.3 Quality Evaluation</h2>
+
+  <h3 class="subsubsection-heading">5.3.1 Condition Labels and Review Coverage</h3>
+
+  <p class="first-indent">The draft quality gate reports that all 30 images matched their assigned condition labels (6 of 6 for each condition). This is a reported label-match result from the supplied presentation, not an independent verification performed during report generation. The same presentation reports 23 images checked and seven excluded for now. Night outputs and view_00 evening remain provisional.</p>
+
+  <h3 class="subsubsection-heading">5.3.2 Edge Alignment</h3>
+
+  <p class="table-caption">Table 5.1: Reported structural edge-alignment ranges</p>
+  <table>
+    <tr><th>Condition</th><th>Reported edge-match range</th><th>Interpretation in supplied presentation</th></tr>
+    <tr><td>Heavy Rain</td><td>0.84&ndash;0.90</td><td>Strongest outline alignment among the reported conditions</td></tr>
+    <tr><td>Evening</td><td>0.58&ndash;0.75</td><td>Moderate alignment; darkness can affect visible edges</td></tr>
+    <tr><td>Snow</td><td>0.56&ndash;0.65</td><td>Moderate alignment</td></tr>
+    <tr><td>Night</td><td>0.37&ndash;0.52</td><td>Lower visible-edge similarity; dark images have fewer edges</td></tr>
+    <tr><td>Sunset</td><td>Near 0</td><td>Major changes to horizon/sky/framing; requires review</td></tr>
+  </table>
+
+  <p>The presentation notes that FLUX outputs may sit up to about eight pixels away from the original, lowering direct similarity. Shift-adjusted edge comparison is a rough signal only. A low edge score can result from intended appearance changes, image shifts or reduced visibility; it is not direct evidence that the underlying 3D geometry moved.</p>
+
+  <div class="page-number">8</div>
+</div>
+
+<div class="page">
+  <h3 class="subsubsection-heading">5.3.3 LPIPS</h3>
+
+  <p class="table-caption">Table 5.2: Reported LPIPS values</p>
+  <table>
+    <tr><th>Condition</th><th>Reported LPIPS</th><th>Interpretation</th></tr>
+    <tr><td>Heavy Rain</td><td>0.34</td><td>Closest to the original among the five reported conditions</td></tr>
+    <tr><td>Snow</td><td>0.46</td><td>Moderate perceptual change</td></tr>
+    <tr><td>Evening</td><td>0.59</td><td>Substantial appearance change</td></tr>
+    <tr><td>Night*</td><td>0.71</td><td>Large change; output provisional</td></tr>
+    <tr><td>Sunset</td><td>0.72</td><td>Largest reported change; visual review warranted</td></tr>
+  </table>
+
+  <p>LPIPS was reported across all 30 original/edited pairs. Lower LPIPS means greater perceptual similarity to the original, not necessarily better realism. Strong weather or lighting changes are expected to increase perceptual distance.</p>
+
+  <h3 class="subsubsection-heading">5.3.4 FID</h3>
+
+  <p class="table-caption">Table 5.3: Pilot FID results</p>
+  <table>
+    <tr><th>FID result</th><th>Status</th><th>Reason</th></tr>
+    <tr>
+      <td>Overall pilot FID: 301.6</td>
+      <td>PILOT &mdash; NOT VALID for a realism claim</td>
+      <td>Only six images per condition were compared; the reference was the same scene&rsquo;s six renders; the groups were not independent.</td>
+    </tr>
+  </table>
+
+  <p>The presentation lists condition-specific pilot values of Heavy Rain 196, Snow 218, Night 300, Sunset 412 and Evening 475. These values are retained here only as reported pilot outputs. They should not be used to rank realism or claim closeness to real UAV imagery. A defensible FID study should compare generated and unaugmented renders against the same sufficiently large real UAV reference set, such as a properly selected VisDrone/UAVid subset or a documented collection of real UAV images.</p>
+
+  <h3 class="subsubsection-heading">5.3.5 Multi-view Consistency Baseline</h3>
+
+  <p class="first-indent">The supplied presentation reports five neighbouring-view baseline scores from the six original renders: 0.161, 0.192, 0.184, 0.154 and 0.140, with a mean of 0.166 and spread of 0.019. This is a baseline only. The presentation explicitly does not treat it as proof that the 3D geometry is correct.</p>
+
+  <div class="page-number">9</div>
+</div>
+
+<div class="page">
+  <h2 class="subsection-heading">5.4 Limitations and Current Status</h2>
+
+  <ul class="report-list">
+    <li>Only six camera views were used, which is a small controlled pilot rather than broad scene coverage.</li>
+    <li>Seven of the 30 generated outputs were excluded for now; night outputs and one evening output were provisional and being regenerated.</li>
+    <li>FID is not valid as a realism claim with the current small, dependent reference setup.</li>
+    <li>Edge alignment and LPIPS do not prove geometry preservation.</li>
+    <li>Genuine matched object boxes, masks or object IDs have not been established in the supplied materials; annotation-based geometry evaluation is therefore NOT VALIDATED.</li>
+    <li>Downstream detection/tracking improvement on a real UAV benchmark has not yet been demonstrated.</li>
+    <li>Quality-gate thresholds are placeholders and require empirical calibration and documented human review.</li>
+  </ul>
+
+  <h2 class="subsection-heading">5.5 Acceptance-Test Summary</h2>
+
+  <p class="table-caption">Table 5.4: Current status and acceptance summary</p>
+  <table>
+    <tr><th>Check</th><th>Reported status</th><th>Conclusion</th></tr>
+    <tr><td>Scene render and six-view setup</td><td>Reported complete in presentation</td><td>Implemented pilot; verify against run artifacts before final submission</td></tr>
+    <tr><td>FLUX generation</td><td>30 images reported</td><td>Generation batch reported complete</td></tr>
+    <tr><td>Per-image JSON metadata</td><td>Reported present and checked for required fields</td><td>Traceability implemented; retain the actual JSONs as evidence</td></tr>
+    <tr><td>Condition-label match</td><td>30/30 reported</td><td>Reported pass in draft gate; visual correctness still needs review</td></tr>
+    <tr><td>Image review coverage</td><td>23 checked; 7 excluded for now</td><td>Partial; not all outputs are accepted</td></tr>
+    <tr><td>LPIPS</td><td>Reported across 30 pairs</td><td>Pilot metric available; interpretation limited to perceptual change</td></tr>
+    <tr><td>FID</td><td>301.6 overall pilot</td><td>NOT VALID for a realism claim</td></tr>
+    <tr><td>3D geometry / object preservation</td><td>No validated matched GT established in supplied materials</td><td>NOT VALIDATED</td></tr>
+    <tr><td>Downstream VisDrone/UAVid utility</td><td>Not reported as completed</td><td>Future evaluation</td></tr>
+  </table>
+
+  <div class="page-number">10</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 6 DIVIDER -->
+<!-- ============================================================ -->
+<div class="page">
+  <div class="chapter-divider">
+    <div class="chapter-label">CHAPTER 6</div>
+    <div class="chapter-title">Conclusion and Future Scope</div>
+    <div class="chapter-sub">6.1 Conclusion</div>
+    <div class="chapter-sub">6.2 Future Scope</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CHAPTER 6 CONTENT -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading">6. CONCLUSION AND FUTURE SCOPE</h1>
+
+  <h2 class="subsection-heading">6.1 Conclusion</h2>
+
+  <p class="first-indent">The Layer 4 pilot demonstrates a documented path from a reconstructed 3DGS scene to condition-edited RGB images using FLUX.1 Kontext. The supplied project presentation reports six original 2_city views and 30 generated variants across sunset, evening, night, heavy rain and snow. Generation settings and per-image JSON metadata provide a basis for traceability and repeatable experiments.</p>
+
+  <p>Preliminary checks include condition-label matching, visual sharpness review, edge alignment, LPIPS, a pilot FID calculation and a multi-view baseline. The results also reveal that evaluation must remain separated: LPIPS measures perceptual change, edge alignment is a 2D structural proxy, and FID depends strongly on a suitable reference set. The reported FID value is not valid evidence of realism, while object-level geometry preservation remains not validated without genuine matched annotations.</p>
+
+  <p>Accordingly, the current contribution should be described as a working controlled augmentation pipeline and preliminary quality-review workflow. It should not yet be described as proving geometry preservation or improving downstream UAV detection.</p>
+
+  <h2 class="subsection-heading">6.2 Future Scope</h2>
+
+  <ul class="report-list">
+    <li>Regenerate provisional night and evening outputs, then re-run metadata and visual checks.</li>
+    <li>Increase the number and diversity of camera views and conditions.</li>
+    <li>Calibrate quality-gate thresholds using a documented validation set and human-review protocol.</li>
+    <li>Select a sufficiently large real UAV reference set and compare both unaugmented and augmented renders against the same reference for a defensible FID analysis.</li>
+    <li>Inspect candidate datasets for genuine annotations and camera/view correspondence before running bounding-box IoU or segmentation consistency.</li>
+    <li>Measure cross-view consistency on augmented variants, not only the original-render baseline.</li>
+    <li>Train/evaluate a downstream UAV detector on real benchmark data such as VisDrone or UAVid, with a controlled baseline and augmented-data comparison.</li>
+    <li>Capture exact model revisions, dependency versions, GPU details, logs and hashes for reproducibility.</li>
+    <li>Export accepted images with the correct annotations and metadata only after review; do not infer or fabricate labels.</li>
+  </ul>
+
+  <div class="page-number">11</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- REFERENCES -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading" style="page-break-before: always;">REFERENCES</h1>
+
+  <div class="reference-item">[1] B. Kerbl, G. Kopanas, T. Leimk&uuml;hler, and G. Drettakis, &ldquo;3D Gaussian Splatting for Real-Time Radiance Field Rendering,&rdquo; ACM Transactions on Graphics, vol. 42, no. 4, 2023.</div>
+
+  <div class="reference-item">[2] Black Forest Labs, &ldquo;FLUX.1 Kontext,&rdquo; model and technical documentation. The exact model ID reported in the project metadata is black-forest-labs/FLUX.1-Kontext-dev. Accessed for project implementation; record the exact model revision used in the final experiment log.</div>
+
+  <div class="reference-item">[3] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, &ldquo;The Unreasonable Effectiveness of Deep Features as a Perceptual Metric,&rdquo; Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2018.</div>
+
+  <div class="reference-item">[4] M. Heusel et al., &ldquo;GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium,&rdquo; Advances in Neural Information Processing Systems (NeurIPS), 2017. This work introduced the commonly used Fr&eacute;chet Inception Distance evaluation.</div>
+
+  <div class="reference-item">[5] VisDrone: Vision Meets Drones, dataset and benchmark resources. Use a documented version and split if selected as a real-UAV reference or downstream benchmark.</div>
+
+  <div class="reference-item">[6] UAVid: A Semantic Segmentation Dataset for UAV Imagery, dataset and benchmark resources. Use a documented version and split if selected for future validation.</div>
+
+  <div class="reference-item">[7] Layer 4 team, &ldquo;Layer 4: Generative Augmentation Engine &mdash; Test scene: 2_city, six rendered views, five target conditions,&rdquo; supplied project presentation, 17 slides, 2026.</div>
+
+  <div class="reference-item">[8] Layer 4 team, &ldquo;Generative Augmentation Engine: FLUX.1 Kontext pipeline for weather and domain augmentation of UAV scenes,&rdquo; supplied project presentation, 18 slides, 2026.</div>
+
+  <div class="reference-item">[9] Layer 4 team, &ldquo;Layer 4 handoff / execution notes,&rdquo; supplied project notes. Used to preserve the distinction between verified implementation, provisional results and not-validated evaluation.</div>
+
+  <p style="margin-top: 16pt;"><em>Note: References [2], [5] and [6] should be completed with the exact access date, URL, dataset release/version and citation style required by the department. The project presentations are cited as internal supplied materials; replace these with formal repository/run-artifact citations if available.</em></p>
+
+  <div class="page-number">12</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ANNEXURE A -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading" style="page-break-before: always;">ANNEXURE A: STUDENT CONTRIBUTION STATEMENT</h1>
+
+  <p class="first-indent">The following table is a team-level contribution template. The supplied materials identify multiple work areas but do not provide a verified individual allocation for all seven students. The team should review and update the allocation before signing; roles must not be inferred solely from presentation order.</p>
+
+  <p class="table-caption">Table A.1: Student contribution statement</p>
+  <table>
+    <tr>
+      <th>Student</th>
+      <th>Section</th>
+      <th>Roll No.</th>
+      <th>Contribution statement (team to confirm)</th>
+    </tr>
+    <tr>
+      <td>Harshvardhan Talokar</td>
+      <td>A7</td>
+      <td>44</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+    <tr>
+      <td>Parth Gupta</td>
+      <td>A5</td>
+      <td>21</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+    <tr>
+      <td>Madhulika Deshpande</td>
+      <td>A7</td>
+      <td>34</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+    <tr>
+      <td>Mansi Jain</td>
+      <td>A7</td>
+      <td>54</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+    <tr>
+      <td>Vaishnavi Singh</td>
+      <td>A1</td>
+      <td>01</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+    <tr>
+      <td>Rashi Rahangdale</td>
+      <td>A4</td>
+      <td>32</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+    <tr>
+      <td>Aarohi Nagdeote</td>
+      <td>B3</td>
+      <td>01</td>
+      <td>To be confirmed by the team; align with actual commits, experiment logs and presentation responsibilities.</td>
+    </tr>
+  </table>
+
+  <div class="page-number">13</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ANNEXURE B -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading" style="page-break-before: always;">ANNEXURE B: PROJECT OUTPUTS AND METADATA</h1>
+
+  <p class="first-indent">The supplied presentation describes the following expected artifacts. Attach the actual files or repository paths at final submission so that the report can be audited.</p>
+
+  <p class="table-caption">Table B.1: Project outputs and metadata</p>
+  <table>
+    <tr><th>Artifact</th><th>Purpose</th><th>Evidence / status</th></tr>
+    <tr><td>Six original RGB renders</td><td>Fixed inputs from the 2_city scene</td><td>Reported as rendered; attach files and camera JSONs</td></tr>
+    <tr><td>Condition-augmented PNGs</td><td>Five conditions &times; six views</td><td>30 generated images reported; 23 checked, 7 excluded for now</td></tr>
+    <tr><td>Per-image JSON sidecars</td><td>Prompt, condition, model, seed and settings</td><td>Reported present; attach sidecars or repository path</td></tr>
+    <tr><td>Quality-check notebook/output</td><td>Condition, sharpness, edge and LPIPS results</td><td>Draft/provisional outputs exist per presentation; attach logs</td></tr>
+    <tr><td>FID pilot output</td><td>Exploratory feature-distribution comparison</td><td>301.6 overall; explicitly not valid as realism evidence</td></tr>
+    <tr><td>Multi-view baseline</td><td>Original-render neighbouring-view comparison</td><td>Mean 0.166, spread 0.019, as reported</td></tr>
+    <tr><td>Ground-truth annotations</td><td>Required for object/geometry metrics</td><td>Not established in supplied materials; geometry evaluation NOT VALIDATED</td></tr>
+    <tr><td>Downstream benchmark results</td><td>Tests utility on real UAV data</td><td>Not reported as complete; future work</td></tr>
+  </table>
+
+  <div class="page-number">14</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ANNEXURE C -->
+<!-- ============================================================ -->
+<div class="page">
+  <h1 class="section-heading" style="page-break-before: always;">ANNEXURE C: PROMPT AND REPRODUCIBILITY CHECKLIST</h1>
+
+  <ul class="report-list">
+    <li>Record the exact condition prompt used for each generated image.</li>
+    <li>Record the source render path and view identifier.</li>
+    <li>Record model ID and exact model revision.</li>
+    <li>Record seed, guidance scale, output dimensions, runtime and GPU environment.</li>
+    <li>Store the output image and JSON sidecar together.</li>
+    <li>Check condition correctness and visually inspect artifacts.</li>
+    <li>Record whether each output is accepted, requires review, or is excluded.</li>
+    <li>Never report a metric as validated unless its data, protocol and run output are available.</li>
+    <li>Do not claim geometry preservation from FID, LPIPS or edge alignment alone.</li>
+  </ul>
+
+  <div class="page-number">15</div>
+</div>
+
+</body>
+</html>
