@@ -18,3 +18,7 @@ notebooks/_*.ipynb
 data/simulated/*.db
 data/simulated/*.db-journal
 data/audit/
+
+# Formatted report outputs (not for version control)
+Layer4_Generative_Augmentation_Report_Formatted.html
+Layer4_Generative_Augmentation_Report_Formatted.docx
